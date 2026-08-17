@@ -33,15 +33,12 @@ fi
 # (proc, sysfs, tmpfs, /etc/hosts, and resolver files) are expected; no host
 # project or home path may appear as an additional bind mount.
 mount_targets=$(awk '{print $5}' /proc/self/mountinfo)
-# mountinfo escapes spaces as \\040; both destinations are plain paths here.
 grep -qx '/workspace' <<<"$mount_targets" || fail "/workspace mount is missing"
 grep -qx '/home/pi/.pi/agent' <<<"$mount_targets" || fail "agent volume mount is missing"
-host_mounts=$(grep -E '^/(Users|Volumes|private|home/[^/]+/\.pi|home/[^/]+/\.ssh)(/|$)' <<<"$mount_targets" || true)
-if [[ "$host_mounts" == "/home/pi/.pi/agent" ]]; then
-    host_mounts=
-fi
-if [[ -n "$host_mounts" ]]; then
-    fail "host home-related mount is visible"
-fi
+
+# Remove the two intentional mounts before looking for host-like paths.
+unexpected_mounts=$(awk '$5 != "/workspace" && $5 != "/home/pi/.pi/agent" {print $5}' <<<"$mount_targets")
+host_mounts=$(grep -E '^/(Users|Volumes|private|home/[^/]+/\.pi|home/[^/]+/\.ssh)(/|$)' <<<"$unexpected_mounts" || true)
+[[ -z "$host_mounts" ]] || fail "host home-related mount is visible"
 
 printf 'PASS: non-root, project writable, container-local agent volume, no host home or SSH mounts\n'

@@ -6,10 +6,16 @@ The design follows pi's official [Plain Docker](https://github.com/earendil-work
 
 ## Quick start
 
-Build the image:
+Build the image with the pinned pi version (currently `0.84.2`):
 
 ```bash
-docker build -t pi-project-sandbox .
+docker build --pull -t pi-project-sandbox .
+```
+
+To choose a different published version explicitly:
+
+```bash
+docker build --pull --build-arg PI_VERSION=0.84.2 -t pi-project-sandbox .
 ```
 
 Run pi against a project:
@@ -25,14 +31,18 @@ Pass normal pi arguments after the project directory:
 ./pi-project ~/src/my-project --continue
 ```
 
-The default image name is `pi-project-sandbox` and the default agent volume is `pi-project-agent`.
-Override them when needed:
+The default image name is `pi-project-sandbox`.
+Each project gets its own default agent volume derived from its canonical path, such as `pi-project-agent-<hash>`.
+This keeps trust decisions, sessions, auth, and extensions separate between projects.
+Set `PI_DOCKER_VOLUME` only when deliberately opting into a shared volume:
 
 ```bash
 PI_DOCKER_IMAGE=my-pi PI_DOCKER_VOLUME=my-pi-agent ./pi-project ~/src/my-project
 ```
 
 The wrapper refuses to run pi as root because the project bind mount must be writable by the caller's non-root UID.
+The volume-owner preparation is idempotent and runs only once per owner and volume on Linux.
+Docker Desktop is detected and skips it because its VM maps volume ownership for the container runtime.
 
 ## Provider configuration
 
@@ -44,10 +54,12 @@ For a custom OpenAI-compatible provider, copy `.env.example` to an untracked fil
 ```bash
 cp .env.example .env.local
 # Edit .env.local with the real endpoint and secret.
+chmod 600 .env.local
 PI_DOCKER_ENV_FILE="$PWD/.env.local" ./pi-project ~/src/my-project
 ```
 
-The bootstrap writes a custom provider to the container-local `models.json` only on first creation of that file.
+`pi-project` warns if the env file is not mode `600`, but does not change its permissions automatically.
+The bootstrap writes or updates the custom provider in the container-local `models.json` on each startup.
 Its configuration is assembled from:
 
 - `PI_DOCKER_PROVIDER` - provider ID such as `omniroute` or `kilocode`.
@@ -71,7 +83,15 @@ It forwards only an allowlist of provider credentials, pi configuration variable
 
 Pi also supports subscription credentials in `auth.json` and custom provider credentials in `models.json`.
 This runner intentionally does not copy either file from the host.
-If subscription or persistent auth is needed, configure it inside the container-local volume with an interactive run, or use an env-file.
+Use the shell mode to run `/login`, edit `models.json`, or install resources into the volume:
+
+```bash
+./pi-project --shell ~/src/my-project
+```
+
+The shell has the same project and agent-volume mounts, forwarded environment, non-root UID, network mode, and isolation flags as a normal run.
+It starts an interactive bash instead of pi.
+The shell mode requires a TTY and does not accept pi arguments.
 
 ## What pi needs at runtime
 
@@ -92,7 +112,9 @@ Pi's runtime state is under `PI_CODING_AGENT_DIR`, set here to `/home/pi/.pi/age
 - `models-store.json` - optional cached provider catalog data.
 
 The entrypoint creates the directories and bootstraps `settings.json` and `models.json` in the named volume.
+`bootstrap-config.mjs` is the single source of defaults for `settings.json`, including `defaultProjectTrust: "ask"`, `enableAnalytics: false`, `quietStartup: false`, and the volume-local session directory.
 It sets `sessionDir` to the volume-local `sessions` directory, so session data does not land in the project or host home.
+A provider is selected as a default only when its complete provider entry was written.
 
 Pi's documented process variables include `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, `PI_TELEMETRY`, `PI_CACHE_RETENTION`, `HTTP_PROXY`, and `HTTPS_PROXY`.
 Provider-specific credential variables are documented in pi's `providers.md`.
@@ -101,6 +123,8 @@ The wrapper forwards these when they are set.
 Project-local `.pi/settings.json`, `.pi/extensions`, and project `.agents/skills` are still visible because the project itself is mounted.
 Pi asks before trusting project resources by default.
 Use pi's `--approve` for a single run or `/trust` interactively only when the mounted project is trusted.
+Trust is persisted in the selected volume and is keyed by the in-container path `/workspace`, so an explicitly shared volume also shares that trust decision across projects.
+The per-project default avoids this collapse.
 
 ## Isolation properties
 
@@ -160,6 +184,8 @@ Use a throwaway volume for a clean check:
 PI_DOCKER_VOLUME=pi-project-isolation-check ./verify-isolation.sh .
 ```
 
+The verification volume-owner preparation uses the same marker and hardened, networkless helper as `pi-project`, so a second run skips the recursive `chown` when the owner is unchanged.
+
 ## Test pi and session persistence
 
 A provider-backed prompt requires a valid API endpoint and key.
@@ -184,7 +210,7 @@ The repository's automated validation uses `pi --version` and a no-network boots
 To verify that a session was persisted in the named volume without exposing it on the host:
 
 ```bash
-VOLUME=pi-project-agent
+VOLUME=pi-project-agent-<hash>
 docker run --rm \
   --mount "type=volume,src=$VOLUME,dst=/data,readonly" \
   alpine:3.20 sh -c 'find /data/sessions -type f -name "*.jsonl" -print'
@@ -195,17 +221,18 @@ The host project and host home should have no corresponding session file.
 
 ## Updating pi
 
-Rebuild the image to install the version selected by the package manager's current resolution:
+The image pins pi at the `PI_VERSION` build argument's value.
+Rebuild with a deliberate version change:
 
 ```bash
-docker build --pull -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=0.84.2 -t pi-project-sandbox .
 ```
 
-The named volume persists across image updates.
-Back it up or delete it deliberately if you want to reset container-local settings and sessions:
+The named volumes persist across image updates.
+Back one up or delete it deliberately if you want to reset container-local settings and sessions:
 
 ```bash
-docker volume rm pi-project-agent
+docker volume rm pi-project-agent-<hash>
 ```
 
 ## Skills and extensions
@@ -219,18 +246,50 @@ Those resources persist in the named volume and are isolated from the host.
 Global pi settings can list additional resource paths, packages, skills, extensions, prompts, or themes.
 Remember that extensions and skills are executable instructions/code and should be treated as trusted input.
 
-## Network notes
+### Curated host extensions
+
+`pi-ext` treats the host `~/.pi-extensions/` directory as a local, trusted source of extension content.
+It does not use a catalog or hashes.
+Symlinks are resolved and copied as real files into the selected volume, and repeated syncs are safe.
+The volume remains the only location pi reads at runtime.
+
+Sync to the per-project volume and inspect curated versus installed entries:
+
+```bash
+mkdir -p ~/.pi-extensions
+./pi-ext sync ~/src/my-project
+./pi-ext list ~/src/my-project
+```
+
+Set `PI_EXTENSIONS_DIR` to use another curated directory.
+Set `PI_DOCKER_VOLUME` to target an explicitly shared volume without passing a project directory.
+After syncing, run `/reload` in pi to hot-reload extensions.
+Only sync extensions you trust, since they execute inside pi.
+
+## Network notes and egress reality
 
 Pi needs network access to reach the configured model endpoint and may contact pi.dev for update checks, package checks, or install telemetry unless disabled.
 The default runner uses Docker's `bridge` network.
-Set `PI_DOCKER_NETWORK=none` for offline operation, provided the model is not required:
+Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over an allowed network.
+The project bind mount is also readable by that code.
+
+For offline work, disable networking explicitly:
 
 ```bash
 PI_DOCKER_NETWORK=none ./pi-project ~/src/my-project --offline
 ```
 
-For a restricted setup, use a Docker network with egress filtering, an HTTP proxy, or an OpenShell policy boundary.
-Pass `HTTP_PROXY` and `HTTPS_PROXY` explicitly when a proxy is required.
+For a restricted setup, use a Docker bridge network with egress filtering, or an HTTP proxy that permits only the model endpoint and required package/update hosts.
+Pass `HTTP_PROXY` and `HTTPS_PROXY` explicitly when a proxy is required:
+
+```bash
+PI_DOCKER_NETWORK=pi-egress-filtered \
+  HTTP_PROXY=http://proxy.internal:3128 \
+  HTTPS_PROXY=http://proxy.internal:3128 \
+  ./pi-project ~/src/my-project
+```
+
+Configure the filtering network or proxy outside this repository.
 Do not assume that restricting the network protects credentials if the model endpoint itself is untrusted.
 
 ## Sources

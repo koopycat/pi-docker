@@ -15,12 +15,29 @@ const modelId = (env.PI_DOCKER_MODEL || env.PI_DOCKER_MODEL_ID)?.trim();
 const baseUrl = (
   env.PI_DOCKER_API_BASE_URL ||
   env.PI_DOCKER_BASE_URL ||
-  env.OMNIROUTE_API_BASE_URL ||
-  env.OMNIRoute_API_BASE_URL ||
   env.KILOCODE_API_BASE_URL
 )?.trim();
 const api = (env.PI_DOCKER_API || "openai-completions").trim();
 const apiKeyVariable = (env.PI_DOCKER_API_KEY_VARIABLE || "PI_DOCKER_API_KEY").trim();
+
+function numericEnv(name, fallback) {
+  const raw = env[name]?.trim();
+  if (!raw) return fallback;
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number, got ${JSON.stringify(env[name])}`);
+  }
+  return value;
+}
+
+function jsonEnv(name) {
+  try {
+    return JSON.parse(env[name]);
+  } catch (error) {
+    throw new Error(`${name} must contain valid JSON: ${error.message}`);
+  }
+}
 
 const modelsPath = join(configDir, "models.json");
 let models = { providers: {} };
@@ -31,14 +48,15 @@ try {
 }
 models.providers ??= {};
 
+let providerConfigured = false;
 if (provider && baseUrl && modelId) {
   const model = {
     id: modelId,
     name: env.PI_DOCKER_MODEL_NAME?.trim() || modelId,
     reasoning: env.PI_DOCKER_REASONING === "1" || env.PI_DOCKER_REASONING === "true",
     input: ["text"],
-    contextWindow: Number(env.PI_DOCKER_CONTEXT_WINDOW || 128000),
-    maxTokens: Number(env.PI_DOCKER_MAX_TOKENS || 16384),
+    contextWindow: numericEnv("PI_DOCKER_CONTEXT_WINDOW", 128000),
+    maxTokens: numericEnv("PI_DOCKER_MAX_TOKENS", 16384),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 
@@ -50,10 +68,10 @@ if (provider && baseUrl && modelId) {
   };
 
   if (env.PI_DOCKER_COMPAT_JSON) {
-    providerConfig.compat = JSON.parse(env.PI_DOCKER_COMPAT_JSON);
+    providerConfig.compat = jsonEnv("PI_DOCKER_COMPAT_JSON");
   }
   if (env.PI_DOCKER_HEADERS_JSON) {
-    providerConfig.headers = JSON.parse(env.PI_DOCKER_HEADERS_JSON);
+    providerConfig.headers = jsonEnv("PI_DOCKER_HEADERS_JSON");
   }
   if (env.PI_DOCKER_AUTH_HEADER === "1" || env.PI_DOCKER_AUTH_HEADER === "true") {
     providerConfig.authHeader = true;
@@ -63,6 +81,7 @@ if (provider && baseUrl && modelId) {
     ...(models.providers[provider] ?? {}),
     ...providerConfig,
   };
+  providerConfigured = true;
 }
 
 await writeFile(modelsPath, `${JSON.stringify(models, null, 2)}\n`, { mode: 0o600 });
@@ -76,12 +95,13 @@ try {
   if (error.code !== "ENOENT") throw error;
 }
 
-if (provider && modelId) {
+if (providerConfigured) {
   settings.defaultProvider ??= provider;
-  settings.defaultModel ??= modelId;
+  settings.defaultModel ??= `${provider}/${modelId}`;
 }
 settings.defaultProjectTrust ??= "ask";
 settings.enableAnalytics ??= false;
+settings.quietStartup ??= false;
 settings.sessionDir ??= "sessions";
 await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 await chmod(settingsPath, 0o600);

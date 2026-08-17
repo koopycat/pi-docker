@@ -3,20 +3,30 @@ set -Eeuo pipefail
 
 usage() {
     cat >&2 <<'EOF'
-Usage: pi-project PROJECT_DIR [pi arguments...]
+Usage: pi-project [--shell] PROJECT_DIR [pi arguments...]
 
 Build the image first with:
   docker build -t pi-project-sandbox .
 
+Options:
+  --shell                 Open an interactive bash with the same mounts and env.
+
 Environment:
-  PI_DOCKER_IMAGE       Image name (default: pi-project-sandbox)
-  PI_DOCKER_VOLUME      Agent volume (default: pi-project-agent)
-  PI_DOCKER_ENV_FILE    Optional Docker env-file containing runtime secrets
-  PI_DOCKER_NETWORK     Docker network mode (default: bridge)
+  PI_DOCKER_IMAGE         Image name (default: pi-project-sandbox)
+  PI_DOCKER_VOLUME        Agent volume (default: per-project volume)
+  PI_DOCKER_ENV_FILE      Optional Docker env-file containing runtime secrets
+  PI_DOCKER_NETWORK       Docker network mode (default: bridge)
 EOF
     exit 2
 }
 
+[[ $# -ge 1 ]] || usage
+
+SHELL_MODE=false
+if [[ "$1" == "--shell" ]]; then
+    SHELL_MODE=true
+    shift
+fi
 [[ $# -ge 1 ]] || usage
 
 PROJECT_INPUT=$1
@@ -25,10 +35,25 @@ if [[ ! -d "$PROJECT_INPUT" ]]; then
     printf 'pi-project: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
     exit 1
 fi
+if [[ "$SHELL_MODE" == true && $# -gt 0 ]]; then
+    printf 'pi-project: --shell does not accept pi arguments\n' >&2
+    exit 2
+fi
 PROJECT_DIR=$(cd -- "$PROJECT_INPUT" && pwd -P)
 
+project_hash() {
+    if command -v shasum >/dev/null 2>&1; then
+        printf '%s' "$1" | shasum -a 256 | cut -c1-12
+    elif command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$1" | sha256sum | cut -c1-12
+    else
+        printf 'pi-project: shasum or sha256sum is required to derive the project volume\n' >&2
+        exit 1
+    fi
+}
+
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-pi-project-agent}
+VOLUME=${PI_DOCKER_VOLUME:-pi-project-agent-$(project_hash "$PROJECT_DIR")}
 NETWORK=${PI_DOCKER_NETWORK:-bridge}
 RUNTIME_UID=$(id -u)
 RUNTIME_GID=$(id -g)
@@ -37,20 +62,60 @@ if [[ "$RUNTIME_UID" == 0 ]]; then
     exit 1
 fi
 
-if [[ -n "${PI_DOCKER_ENV_FILE:-}" && ! -f "$PI_DOCKER_ENV_FILE" ]]; then
-    printf 'pi-project: env file does not exist: %s\n' "$PI_DOCKER_ENV_FILE" >&2
-    exit 1
+if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
+    if [[ ! -f "$PI_DOCKER_ENV_FILE" ]]; then
+        printf 'pi-project: env file does not exist: %s\n' "$PI_DOCKER_ENV_FILE" >&2
+        exit 1
+    fi
+    env_mode=$(stat -c '%a' "$PI_DOCKER_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$PI_DOCKER_ENV_FILE")
+    if [[ "$env_mode" != "600" ]]; then
+        printf 'pi-project: warning: %s has mode %s; use chmod 600 for an env file containing secrets\n' \
+            "$PI_DOCKER_ENV_FILE" "$env_mode" >&2
+    fi
 fi
 
 docker volume create "$VOLUME" >/dev/null
-# A named volume starts with the image's ownership, but the bind mount must be
-# writable by the caller's mapped UID on Linux and Docker Desktop alike.
-docker run --rm \
-    --user 0:0 \
-    --entrypoint /bin/bash \
-    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-    "$IMAGE" \
-    -euo pipefail -c "chown -R ${RUNTIME_UID}:${RUNTIME_GID} /home/pi/.pi/agent"
+
+# Docker Desktop maps volume ownership through its VM, so this Linux UID/GID
+# preparation is unnecessary there. On Linux, do it once per owner and volume.
+docker_os=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)
+if [[ "$docker_os" =~ [Dd]ocker\ [Dd]esktop ]]; then
+    printf 'pi-project: Docker Desktop detected; skipping volume ownership preparation\n' >&2
+else
+    needs_prep=true
+    if docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=DAC_OVERRIDE \
+        --security-opt=no-new-privileges \
+        --entrypoint /bin/bash \
+        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+        "$IMAGE" \
+        -euo pipefail -c '[[ -f /home/pi/.pi/agent/.owner-initialized ]] && [[ "$(</home/pi/.pi/agent/.owner-initialized)" == "$1:$2" ]]' \
+        -- "$RUNTIME_UID" "$RUNTIME_GID"; then
+        needs_prep=false
+    fi
+    if [[ "$needs_prep" == true ]]; then
+        docker run --rm \
+            --user 0:0 \
+            --network none \
+            --cap-drop=ALL \
+            --cap-add=CHOWN \
+            --cap-add=DAC_OVERRIDE \
+            --security-opt=no-new-privileges \
+            --entrypoint /bin/bash \
+            --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+            "$IMAGE" \
+            -euo pipefail -c 'chown -R "$1:$2" /home/pi/.pi/agent' -- "$RUNTIME_UID" "$RUNTIME_GID"
+        docker run --rm \
+            --user "${RUNTIME_UID}:${RUNTIME_GID}" \
+            --network none \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            --entrypoint /bin/bash \
+            --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+            "$IMAGE" \
+            -euo pipefail -c 'printf "%s:%s\\n" "$1" "$2" > /home/pi/.pi/agent/.owner-initialized' \
+            -- "$RUNTIME_UID" "$RUNTIME_GID"
+    fi
+fi
 
 args=(
     run --rm --init
@@ -101,8 +166,11 @@ done
 
 if [[ -t 0 && -t 1 ]]; then
     args+=(--interactive --tty)
-else
-    args+=(--interactive)
+fi
+
+if [[ "$SHELL_MODE" == true ]]; then
+    args+=(--entrypoint /usr/local/bin/pi-docker-shell)
+    exec docker "${args[@]}" "$IMAGE"
 fi
 
 exec docker "${args[@]}" "$IMAGE" pi "$@"
