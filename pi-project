@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+usage() {
+    cat >&2 <<'EOF'
+Usage: pi-project PROJECT_DIR [pi arguments...]
+
+Build the image first with:
+  docker build -t pi-project-sandbox .
+
+Environment:
+  PI_DOCKER_IMAGE       Image name (default: pi-project-sandbox)
+  PI_DOCKER_VOLUME      Agent volume (default: pi-project-agent)
+  PI_DOCKER_ENV_FILE    Optional Docker env-file containing runtime secrets
+  PI_DOCKER_NETWORK     Docker network mode (default: bridge)
+EOF
+    exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+
+PROJECT_INPUT=$1
+shift
+if [[ ! -d "$PROJECT_INPUT" ]]; then
+    printf 'pi-project: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
+    exit 1
+fi
+PROJECT_DIR=$(cd -- "$PROJECT_INPUT" && pwd -P)
+
+IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
+VOLUME=${PI_DOCKER_VOLUME:-pi-project-agent}
+NETWORK=${PI_DOCKER_NETWORK:-bridge}
+RUNTIME_UID=$(id -u)
+RUNTIME_GID=$(id -g)
+if [[ "$RUNTIME_UID" == 0 ]]; then
+    printf 'pi-project: refusing to run pi as root; invoke it as a non-root user\n' >&2
+    exit 1
+fi
+
+if [[ -n "${PI_DOCKER_ENV_FILE:-}" && ! -f "$PI_DOCKER_ENV_FILE" ]]; then
+    printf 'pi-project: env file does not exist: %s\n' "$PI_DOCKER_ENV_FILE" >&2
+    exit 1
+fi
+
+docker volume create "$VOLUME" >/dev/null
+# A named volume starts with the image's ownership, but the bind mount must be
+# writable by the caller's mapped UID on Linux and Docker Desktop alike.
+docker run --rm \
+    --user 0:0 \
+    --entrypoint /bin/bash \
+    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+    "$IMAGE" \
+    -euo pipefail -c "chown -R ${RUNTIME_UID}:${RUNTIME_GID} /home/pi/.pi/agent"
+
+args=(
+    run --rm --init
+    --user "${RUNTIME_UID}:${RUNTIME_GID}"
+    --workdir /workspace
+    --network "$NETWORK"
+    --security-opt=no-new-privileges
+    --cap-drop=ALL
+    --mount "type=bind,src=${PROJECT_DIR},dst=/workspace"
+    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy"
+    --env HOME=/home/pi
+    --env PI_CODING_AGENT_DIR=/home/pi/.pi/agent
+)
+
+if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
+    args+=(--env-file "$PI_DOCKER_ENV_FILE")
+fi
+
+# Docker passes no host environment by default. Explicitly forward only
+# provider/configuration variables that pi may need, never HOME or host paths.
+env_names=(
+    PI_DOCKER_PROVIDER PI_DOCKER_MODEL PI_DOCKER_MODEL_ID PI_DOCKER_MODEL_NAME
+    PI_DOCKER_API_BASE_URL PI_DOCKER_BASE_URL PI_DOCKER_API PI_DOCKER_API_KEY
+    PI_DOCKER_API_KEY_VARIABLE PI_DOCKER_REASONING PI_DOCKER_CONTEXT_WINDOW
+    PI_DOCKER_MAX_TOKENS PI_DOCKER_COMPAT_JSON PI_DOCKER_HEADERS_JSON
+    PI_DOCKER_AUTH_HEADER
+    ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GEMINI_API_KEY
+    OPENROUTER_API_KEY XAI_API_KEY GROQ_API_KEY MISTRAL_API_KEY
+    CEREBRAS_API_KEY NVIDIA_API_KEY TOGETHER_API_KEY FIREWORKS_API_KEY
+    CLOUDFLARE_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_GATEWAY_ID
+    AI_GATEWAY_API_KEY KIMI_API_KEY MINIMAX_API_KEY MINIMAX_CN_API_KEY
+    RADIUS_API_KEY HF_TOKEN BASETEN_API_KEY OPENCODE_API_KEY
+    QWEN_TOKEN_PLAN_API_KEY QWEN_TOKEN_PLAN_CN_API_KEY
+    HTTP_PROXY HTTPS_PROXY NO_PROXY PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY
+    PI_CACHE_RETENTION
+)
+
+key_variable=${PI_DOCKER_API_KEY_VARIABLE:-}
+if [[ -n "$key_variable" ]]; then
+    env_names+=("$key_variable")
+fi
+
+for name in "${env_names[@]}"; do
+    if [[ -n "${!name+x}" ]]; then
+        args+=(--env "$name")
+    fi
+done
+
+if [[ -t 0 && -t 1 ]]; then
+    args+=(--interactive --tty)
+else
+    args+=(--interactive)
+fi
+
+exec docker "${args[@]}" "$IMAGE" pi "$@"
