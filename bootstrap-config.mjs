@@ -72,6 +72,15 @@ if (provider && baseUrl && modelId) {
   }
   if (env.PI_DOCKER_HEADERS_JSON) {
     providerConfig.headers = jsonEnv("PI_DOCKER_HEADERS_JSON");
+    const sensitive = /(authorization|token|secret|api[-_]?key|password|bearer)/i;
+    const risky = Object.entries(providerConfig.headers).some(
+      ([key, value]) => sensitive.test(key) || (typeof value === "string" && /^bearer\s/i.test(value)),
+    );
+    if (risky) {
+      console.warn(
+        "pi-docker: PI_DOCKER_HEADERS_JSON appears to contain a credential; it is stored in plaintext at models.json (mode 0600) inside the agent volume.",
+      );
+    }
   }
   if (env.PI_DOCKER_AUTH_HEADER === "1" || env.PI_DOCKER_AUTH_HEADER === "true") {
     providerConfig.authHeader = true;

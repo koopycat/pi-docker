@@ -6,7 +6,7 @@ The design follows pi's official [Plain Docker](https://github.com/earendil-work
 
 ## Quick start
 
-Build the image with the pinned pi version (currently `0.84.2`):
+Build the image with the pinned pi version (currently `0.87.1`):
 
 ```bash
 docker build --pull -t pi-project-sandbox .
@@ -15,7 +15,7 @@ docker build --pull -t pi-project-sandbox .
 To choose a different published version explicitly:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=0.84.2 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=0.87.1 -t pi-project-sandbox .
 ```
 
 Run pi against a project:
@@ -41,8 +41,8 @@ PI_DOCKER_IMAGE=my-pi PI_DOCKER_VOLUME=my-pi-agent ./pi-project ~/src/my-project
 ```
 
 The wrapper refuses to run pi as root because the project bind mount must be writable by the caller's non-root UID.
-The volume-owner preparation is idempotent and runs only once per owner and volume on Linux.
-Docker Desktop is detected and skips it because its VM maps volume ownership for the container runtime.
+The named volume is created root-owned, so `lib/volumes.sh` prepares its ownership for the invoking UID/GID on every platform, including Docker Desktop.
+The preparation is idempotent: a marker file records the owner, so subsequent runs only read it.
 
 ## Provider configuration
 
@@ -80,6 +80,8 @@ OPENAI_API_KEY="$OPENAI_API_KEY" ./pi-project ~/src/my-project --provider openai
 
 The wrapper does not forward the host environment wholesale.
 It forwards only an allowlist of provider credentials, pi configuration variables, and proxy variables, plus variables explicitly named by `PI_DOCKER_API_KEY_VARIABLE`.
+The same allowlist filters `PI_DOCKER_ENV_FILE`: entries whose names are not allowlisted are dropped with a warning, so the file cannot set `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, `PATH`, or other container-affecting variables.
+`PI_DOCKER_HEADERS_JSON` values are written to `models.json` inside the volume, so avoid credentials there; the bootstrap warns when it detects a credential-like header name.
 
 Pi also supports subscription credentials in `auth.json` and custom provider credentials in `models.json`.
 This runner intentionally does not copy either file from the host.
@@ -92,6 +94,7 @@ Use the shell mode to run `/login`, edit `models.json`, or install resources int
 The shell has the same project and agent-volume mounts, forwarded environment, non-root UID, network mode, and isolation flags as a normal run.
 It starts an interactive bash instead of pi.
 The shell mode requires a TTY and does not accept pi arguments.
+The container maps the caller's arbitrary UID/GID to the name `pi` (via libnss-wrapper and `setup-identity.sh`), so prompts, `whoami`, and `os.userInfo()` work without adding the host UID to `/etc/passwd`.
 
 ## What pi needs at runtime
 
@@ -152,6 +155,7 @@ Those are Docker plumbing, not host home or project mounts.
 
 The project remains writable because it is bind-mounted and the container process uses the invoking user's UID and GID.
 The agent volume is prepared with the same UID and GID before pi starts.
+This relies on the container seeing the same numeric IDs as the host, which holds for a rootful Docker daemon; see Known limitations for rootless Docker and `userns-remap`.
 
 ### Why not mount the host `.pi`
 
@@ -159,6 +163,14 @@ Mounting the host `.pi` would defeat the isolation boundary.
 It can expose provider credentials in `auth.json`, trust decisions, extensions with arbitrary code execution, keybindings, cached catalogs, and full session history.
 Host configuration can also contain symlinks or paths that point outside the intended project.
 Keeping the directory in a named volume makes the container's settings and session history independent from the host harness.
+
+## Known limitations
+
+- **Rootless Docker and `userns-remap`.** The runner maps the caller's numeric UID/GID into the container, assuming the container sees the same IDs as the host. A rootless daemon or a rootful daemon with `userns-remap` shifts those IDs, so the project bind mount may not be writable. Use the default rootful daemon, or pass `--userns=host` (rootful only) as an explicit opt-in that weakens namespace isolation. Rootless Docker is not supported out of the box.
+- **SELinux hosts.** On enforcing hosts such as Fedora, the project bind mount may need a relabel. Add `:z` to the project mount or set the SELinux context; the wrapper does not relabel automatically because that modifies the host project.
+- **Shared volumes.** The marker-based ownership helper targets a single UID/GID. If you deliberately share one volume across host users with `PI_DOCKER_VOLUME`, first use by a new owner re-chowns it; do not run two owners against the same volume concurrently.
+- **Identity shim.** The container preloads the fixed library path `/usr/local/lib/libnss_wrapper.so` so the arbitrary UID resolves to `pi`. `LD_PRELOAD` is inherited by agent-spawned processes; it is always set to that path and never taken from the environment.
+- **Base image.** `node:24-bookworm-slim` is referenced by tag rather than digest for cross-architecture portability; pin a digest if you need reproducible builds.
 
 ## Verify isolation
 
@@ -184,7 +196,7 @@ Use a throwaway volume for a clean check:
 PI_DOCKER_VOLUME=pi-project-isolation-check ./verify-isolation.sh .
 ```
 
-The verification volume-owner preparation uses the same marker and hardened, networkless helper as `pi-project`, so a second run skips the recursive `chown` when the owner is unchanged.
+`pi-project`, `pi-ext`, and `verify-isolation.sh` share the same marker-based, hardened, networkless helper in `lib/volumes.sh`, so a second run skips the recursive `chown` when the owner is unchanged.
 
 ## Test pi and session persistence
 
@@ -205,7 +217,7 @@ PI_DOCKER_ENV_FILE="$PWD/.env.local" ./pi-project /tmp/pi-test -p "Reply with th
 ```
 
 Replace the endpoint, model, and key with a real provider before running this test.
-The repository's automated validation uses `pi --version` and a no-network bootstrap smoke test when no real provider credentials are available.
+`./test.sh` runs an offline smoke test (`pi --version` plus bootstrap checks) that needs no provider credentials and no network. `./verify-isolation.sh` performs the mount-level isolation check.
 
 To verify that a session was persisted in the named volume without exposing it on the host:
 
@@ -225,7 +237,7 @@ The image pins pi at the `PI_VERSION` build argument's value.
 Rebuild with a deliberate version change:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=0.84.2 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=0.87.1 -t pi-project-sandbox .
 ```
 
 The named volumes persist across image updates.
@@ -252,6 +264,7 @@ Remember that extensions and skills are executable instructions/code and should 
 It does not use a catalog or hashes.
 Symlinks are resolved and copied as real files into the selected volume, and repeated syncs are safe.
 The volume remains the only location pi reads at runtime.
+Because resolution happens on the host, a curated entry can pull in any host file the user can read; treat `~/.pi-extensions` as trusted input and review it before syncing.
 
 Sync to the per-project volume and inspect curated versus installed entries:
 
@@ -303,3 +316,7 @@ The runtime requirements and behavior documented here are based on the installed
 - `docs/environment-variables.md` - `PI_CODING_AGENT_DIR`, session configuration, offline mode, telemetry, and proxy variables.
 - `docs/extensions.md` and `docs/skills.md` - resource locations, project trust, and security implications.
 - `docs/sessions.md` and `docs/session-format.md` - container-local session storage and JSONL layout.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

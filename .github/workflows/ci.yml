@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint shell scripts
+        run: |
+          shellcheck \
+            bootstrap.sh \
+            lib/volumes.sh \
+            pi-docker-shell \
+            pi-ext \
+            pi-project \
+            setup-identity.sh \
+            test.sh \
+            verify-isolation-inner.sh \
+            verify-isolation.sh
+
+      - name: Validate bootstrap config script
+        run: node --check bootstrap-config.mjs
+
+      - name: Build image
+        run: docker build --pull -t pi-project-sandbox .
+
+      - name: Offline smoke test
+        run: ./test.sh
+
+      - name: Isolation check
+        run: ./verify-isolation.sh .

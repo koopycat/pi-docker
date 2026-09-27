@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Offline smoke test: no provider credentials required and no network access.
+# Verifies that the entrypoint bootstraps the agent volume and that pi runs.
+#
+# Build the image first:
+#   docker build -t pi-project-sandbox .
+# Then run:
+#   ./test.sh
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/volumes.sh
+source "${SCRIPT_DIR}/lib/volumes.sh"
+
+IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
+VOLUME=${PI_DOCKER_VOLUME:-pi-project-test}
+
+[[ "$(id -u)" != 0 ]] || {
+    printf 'Refusing to run tests as root; invoke as a non-root user.\n' >&2
+    exit 1
+}
+
+docker image inspect "$IMAGE" >/dev/null 2>&1 || {
+    printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
+    exit 1
+}
+
+prepare_volume_owner
+
+run() {
+    docker run --rm \
+        --user "$(id -u):$(id -g)" \
+        --network none \
+        --cap-drop=ALL \
+        --security-opt=no-new-privileges \
+        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+        "$IMAGE" \
+        "$@"
+}
+
+# Run through the real entrypoint so the bootstrap step is exercised too.
+version=$(run pi --version)
+[[ -n "$version" ]] || {
+    printf 'pi --version produced no output\n' >&2
+    exit 1
+}
+printf 'pi version: %s\n' "$version"
+
+identity=$(run id -un)
+[[ "$identity" == "pi" ]] || {
+    printf 'expected container user name "pi", got %s\n' "$identity" >&2
+    exit 1
+}
+printf 'identity: %s (%s)\n' "$identity" "$(run id -gn)"
+
+run node -e 'JSON.parse(require("fs").readFileSync("/home/pi/.pi/agent/settings.json","utf8"))'
+run test -s /home/pi/.pi/agent/settings.json
+run test -s /home/pi/.pi/agent/models.json
+
+printf 'PASS: offline smoke test\n'

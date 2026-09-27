@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/volumes.sh
+source "${SCRIPT_DIR}/lib/volumes.sh"
+
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 SOURCE=${PI_EXTENSIONS_DIR:-${HOME}/.pi-extensions}
 
@@ -21,19 +25,11 @@ shift
 [[ "$COMMAND" == sync || "$COMMAND" == list ]] || usage
 [[ $# -le 1 ]] || usage
 
-project_hash() {
-    if command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$1" | shasum -a 256 | cut -c1-12
-    elif command -v sha256sum >/dev/null 2>&1; then
-        printf '%s' "$1" | sha256sum | cut -c1-12
-    else
-        printf 'pi-ext: shasum or sha256sum is required to derive the project volume\n' >&2
-        exit 1
-    fi
-}
-
 if [[ -n "${PI_DOCKER_VOLUME:-}" ]]; then
     VOLUME=$PI_DOCKER_VOLUME
+    if [[ $# -gt 0 ]]; then
+        printf 'pi-ext: ignoring project directory %s because PI_DOCKER_VOLUME is set\n' "$1" >&2
+    fi
 else
     [[ $# -eq 1 ]] || {
         printf 'pi-ext: a project directory is required unless PI_DOCKER_VOLUME is set\n' >&2
@@ -43,7 +39,7 @@ else
         printf 'pi-ext: project directory does not exist: %s\n' "$1" >&2
         exit 1
     }
-    VOLUME="pi-project-agent-$(project_hash "$PROJECT_DIR")"
+    VOLUME=$(project_volume_name "$PROJECT_DIR")
 fi
 
 if [[ "$COMMAND" == list ]]; then
@@ -72,12 +68,7 @@ fi
     printf 'pi-ext: curated source directory does not exist: %s\n' "$SOURCE" >&2
     exit 1
 }
-docker volume create "$VOLUME" >/dev/null
-
-# Resolve symlinks on the host first. This lets curated entries point at real
-# extension content elsewhere in the host checkout while the Docker mount stays
-# limited to a temporary, read-only staging directory.
-staging=$(mktemp -d "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/.pi-ext.XXXXXX")
+staging=$(mktemp -d "${SCRIPT_DIR}/.pi-ext.XXXXXX")
 cleanup() { rm -rf "$staging"; }
 trap cleanup EXIT
 while IFS= read -r -d '' entry; do
@@ -87,28 +78,7 @@ find "$staging" -name '._*' -delete
 
 # The caller-mapped runtime UID owns the volume, so prepare it once before
 # copying as root. Existing unrelated extensions are preserved.
-needs_prep=true
-if docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=DAC_OVERRIDE \
-    --security-opt=no-new-privileges \
-    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-    --entrypoint /bin/bash "$IMAGE" \
-    -euo pipefail -c '[[ -f /home/pi/.pi/agent/.owner-initialized ]] && [[ "$(</home/pi/.pi/agent/.owner-initialized)" == "$1:$2" ]]' \
-    -- "$(id -u)" "$(id -g)"; then
-    needs_prep=false
-fi
-if [[ "$needs_prep" == true ]]; then
-    docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=CHOWN \
-        --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-        --entrypoint /bin/bash "$IMAGE" \
-        -euo pipefail -c 'chown -R "$1:$2" /home/pi/.pi/agent' -- "$(id -u)" "$(id -g)"
-    docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL \
-        --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-        --entrypoint /bin/bash "$IMAGE" \
-        -euo pipefail -c 'printf "%s:%s\\n" "$1" "$2" > /home/pi/.pi/agent/.owner-initialized' \
-        -- "$(id -u)" "$(id -g)"
-fi
+prepare_volume_owner
 
 docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE \
     --security-opt=no-new-privileges \

@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/volumes.sh
+source "${ROOT_DIR}/lib/volumes.sh"
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-pi-project-verify}
 PROJECT_DIR=${1:-$ROOT_DIR}
@@ -23,46 +25,9 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
     exit 1
 }
-docker volume create "$VOLUME" >/dev/null
-
-docker_os=$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)
-if [[ "$docker_os" =~ [Dd]ocker\ [Dd]esktop ]]; then
-    printf 'Docker Desktop detected; skipping volume ownership preparation.\n' >&2
-else
-    needs_prep=true
-    if docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=DAC_OVERRIDE \
-        --security-opt=no-new-privileges \
-        --entrypoint /bin/bash \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-        "$IMAGE" \
-        -euo pipefail -c '[[ -f /home/pi/.pi/agent/.owner-initialized ]] && [[ "$(</home/pi/.pi/agent/.owner-initialized)" == "$1:$2" ]]' \
-        -- "$(id -u)" "$(id -g)"; then
-        needs_prep=false
-    fi
-    if [[ "$needs_prep" == true ]]; then
-        docker run --rm \
-            --user 0:0 \
-            --network none \
-            --cap-drop=ALL \
-            --cap-add=CHOWN \
-            --cap-add=DAC_OVERRIDE \
-            --security-opt=no-new-privileges \
-            --entrypoint /bin/bash \
-            --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-            "$IMAGE" \
-            -euo pipefail -c 'chown -R "$1:$2" /home/pi/.pi/agent' -- "$(id -u)" "$(id -g)"
-        docker run --rm \
-            --user "$(id -u):$(id -g)" \
-            --network none \
-            --cap-drop=ALL \
-            --security-opt=no-new-privileges \
-            --entrypoint /bin/bash \
-            --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-            "$IMAGE" \
-            -euo pipefail -c 'printf "%s:%s\\n" "$1" "$2" > /home/pi/.pi/agent/.owner-initialized' \
-            -- "$(id -u)" "$(id -g)"
-    fi
-fi
+# The named agent volume is created root-owned and mounted with volume-nocopy,
+# so its ownership must be prepared for the invoking UID/GID on every platform.
+prepare_volume_owner
 
 # Use the same two mounts as pi-project, with no host HOME or environment file.
 # volume-nocopy prevents Docker from copying image seed files into the named volume.
