@@ -7,6 +7,15 @@ Run the [Pi coding agent](https://github.com/earendil-works/pi-mono) against a p
 You need Docker Engine or Docker Desktop running.
 
 ```bash
+docker pull ghcr.io/koopycat/pi-docker:latest
+PI_DOCKER_IMAGE=ghcr.io/koopycat/pi-docker ./pi-project /path/to/project
+```
+
+The published image supports `linux/amd64` and `linux/arm64`. GitHub Actions updates `latest` from `main` and publishes a matching image tag for each `v*` Git tag.
+
+To build the image locally instead:
+
+```bash
 docker build --pull -t pi-project-sandbox .
 ./pi-project /path/to/project
 ```
