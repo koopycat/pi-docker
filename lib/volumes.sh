@@ -24,17 +24,17 @@ project_volume_name() {
     hash=$(project_hash "$1") || return 1
     printf 'pi-project-agent-%s' "$hash"
 }
-#
+
 # Make the agent volume writable by the invoking host UID/GID.
 #
-# The agent volume is created by `docker volume create` (root-owned) and mounted
-# with `volume-nocopy`, so Docker never seeds it with the image's home-directory
-# ownership. That means the volume root is owned by root:root and the runtime,
-# which runs as the caller's non-root UID, cannot create files in it.
+# The agent volume is mounted with `volume-nocopy`, so Docker never seeds it with
+# the image's home-directory ownership. A new volume root is owned by root:root
+# and the runtime, which runs as the caller's non-root UID, cannot write to it.
 #
 # This applies on every platform, including Docker Desktop: named volumes live in
-# the VM's filesystem and are root-owned regardless of the host. Preparation is
-# idempotent and becomes a single marker read after the first successful run.
+# the VM's filesystem and are root-owned regardless of the host. `docker run`
+# creates the volume on first use. Preparation is one short-lived container that
+# only reads a marker file once the volume is prepared for this exact owner.
 #
 # Requires IMAGE and VOLUME to be set. Must be invoked as a non-root user.
 
@@ -50,19 +50,8 @@ prepare_volume_owner() {
         return 1
     fi
 
-    docker volume create "$VOLUME" >/dev/null
-
-    # Fast path: the volume was already prepared for this exact owner.
-    if docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=DAC_OVERRIDE \
-        --security-opt=no-new-privileges \
-        --entrypoint /bin/bash \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-        "$IMAGE" \
-        -euo pipefail -c '[[ -f /home/pi/.pi/agent/.owner-initialized ]] && [[ "$(</home/pi/.pi/agent/.owner-initialized)" == "$1:$2" ]]' \
-        -- "$uid" "$gid"; then
-        return 0
-    fi
-
+    # The marker is removed before rewriting so a symlink planted in the
+    # volume is replaced rather than followed.
     docker run --rm \
         --user 0:0 \
         --network none \
@@ -73,16 +62,12 @@ prepare_volume_owner() {
         --entrypoint /bin/bash \
         --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
         "$IMAGE" \
-        -euo pipefail -c 'chown -R "$1:$2" /home/pi/.pi/agent' -- "$uid" "$gid"
-
-    docker run --rm \
-        --user "${uid}:${gid}" \
-        --network none \
-        --cap-drop=ALL \
-        --security-opt=no-new-privileges \
-        --entrypoint /bin/bash \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-        "$IMAGE" \
-        -euo pipefail -c 'printf "%s:%s\n" "$1" "$2" > /home/pi/.pi/agent/.owner-initialized' \
-        -- "$uid" "$gid"
+        -euo pipefail -c '
+            marker=/home/pi/.pi/agent/.owner-initialized
+            [[ -f "$marker" && ! -L "$marker" && "$(<"$marker")" == "$1:$2" ]] && exit 0
+            chown -R "$1:$2" /home/pi/.pi/agent
+            rm -f "$marker"
+            printf "%s:%s\n" "$1" "$2" >"$marker"
+            chown "$1:$2" "$marker"
+        ' -- "$uid" "$gid"
 }

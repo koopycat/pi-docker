@@ -58,4 +58,14 @@ run node -e 'JSON.parse(require("fs").readFileSync("/home/pi/.pi/agent/settings.
 run test -s /home/pi/.pi/agent/settings.json
 run test -s /home/pi/.pi/agent/models.json
 
+# HOME must be writable by the caller's UID, not only the image's UID 1001.
+run bash -c 'touch "$HOME/.probe" && git config --global user.name probe'
+
+# The platform pruning in the Dockerfile must keep this platform's esbuild binary.
+run node -e '
+    const { createRequire } = require("node:module");
+    const require_ = createRequire("/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/package.json");
+    require_("esbuild").transformSync("let x: number = 1", { loader: "ts" });
+'
+
 printf 'PASS: offline smoke test\n'

@@ -1,15 +1,19 @@
 name: CI
 
+# Pushes to main and tags run this through publish-image.yml, which only
+# publishes after it passes.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Lint shell scripts
         run: |
@@ -24,8 +28,10 @@ jobs:
             verify-isolation-inner.sh \
             verify-isolation.sh
 
-      - name: Validate bootstrap config script
-        run: node --check bootstrap-config.mjs
+      - name: Validate Node scripts
+        run: |
+          node --check bootstrap-config.mjs
+          node --check lib/prune-foreign-platforms.mjs
 
       - name: Build image
         run: docker build --pull -t pi-project-sandbox .

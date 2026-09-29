@@ -52,8 +52,12 @@ if [[ "$COMMAND" == list ]]; then
         printf '(directory does not exist)\n'
     fi
     printf 'Installed:\n'
-    docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=DAC_OVERRIDE --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+    if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+        printf '(volume does not exist)\n'
+        exit 0
+    fi
+    docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
+        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy,readonly" \
         --entrypoint /bin/bash "$IMAGE" \
         -euo pipefail -c '
             directory=/home/pi/.pi/agent/extensions
@@ -76,20 +80,18 @@ while IFS= read -r -d '' entry; do
 done < <(find "$SOURCE" -mindepth 1 -maxdepth 1 -print0)
 find "$staging" -name '._*' -delete
 
-# The caller-mapped runtime UID owns the volume, so prepare it once before
-# copying as root. Existing unrelated extensions are preserved.
+# Once prepared, the volume belongs to the caller's UID/GID, so the copy runs
+# as that user with no capabilities. Existing unrelated extensions are preserved.
 prepare_volume_owner
 
-docker run --rm --user 0:0 --network none --cap-drop=ALL --cap-add=CHOWN --cap-add=DAC_OVERRIDE \
-    --security-opt=no-new-privileges \
+docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
     --mount "type=bind,src=${staging},dst=/source,readonly" \
     --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
     --entrypoint /bin/bash "$IMAGE" \
     -euo pipefail -c '
         destination=/home/pi/.pi/agent/extensions
         mkdir -p "$destination"
-        cp -a /source/. "$destination/"
-        chown -R "$1:$2" "$destination"
-    ' -- "$(id -u)" "$(id -g)"
+        cp -R --remove-destination --preserve=mode,timestamps /source/. "$destination/"
+    '
 printf 'Synced %s into %s (/home/pi/.pi/agent/extensions). Run /reload in pi to hot-reload.\n' \
     "$SOURCE" "$VOLUME"

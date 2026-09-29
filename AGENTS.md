@@ -18,3 +18,6 @@
 - Only allowlisted environment names enter the container; `PI_DOCKER_ENV_FILE` is filtered through the same allowlist and `PI_DOCKER_API_KEY_VARIABLE` must name an allowed variable.
 - Secrets enter at runtime through a Docker env-file or explicitly forwarded variables.
 - Do not mount the host home directory, `~/.pi`, or `~/.ssh`.
+- `/home/pi` is mode 1777 because the runtime UID is the caller's, not the image's 1001.
+- pi's shrinkwrap makes npm install every `@esbuild/*` platform binary; `lib/prune-foreign-platforms.mjs` removes them and must run in the same `RUN` layer as `npm install`.
+- `publish-image.yml` calls `ci.yml` and publishes only after it passes; do not add a separate push trigger to `ci.yml`.
