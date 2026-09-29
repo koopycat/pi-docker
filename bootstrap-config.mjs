@@ -14,8 +14,7 @@ const provider = env.PI_DOCKER_PROVIDER?.trim();
 const modelId = (env.PI_DOCKER_MODEL || env.PI_DOCKER_MODEL_ID)?.trim();
 const baseUrl = (
   env.PI_DOCKER_API_BASE_URL ||
-  env.PI_DOCKER_BASE_URL ||
-  env.KILOCODE_API_BASE_URL
+  env.PI_DOCKER_BASE_URL
 )?.trim();
 const api = (env.PI_DOCKER_API || "openai-completions").trim();
 const apiKeyVariable = (env.PI_DOCKER_API_KEY_VARIABLE || "PI_DOCKER_API_KEY").trim();
