@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "customManagers": [
+    {
+      "description": "Pinned pi version in the Dockerfile and the guide",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/", "/^docs/guide\\.md$/"],
+      "matchStrings": [
+        "ARG PI_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "--build-arg PI_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "pinned pi version \\(currently `(?<currentValue>\\d+\\.\\d+\\.\\d+)`\\)"
+      ],
+      "depNameTemplate": "@earendil-works/pi-coding-agent",
+      "datasourceTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Wait out quick follow-up fixes; ci.yml gates every bump",
+      "matchDepNames": ["@earendil-works/pi-coding-agent"],
+      "minimumReleaseAge": "1 day",
+      "semanticCommitType": "feat",
+      "semanticCommitScope": "pi"
+    },
+    {
+      "description": "Merge pi patch releases once CI is green; 0.x minors can break and stay open for review. Renovate merges itself because main has no required checks.",
+      "matchDepNames": ["@earendil-works/pi-coding-agent"],
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "platformAutomerge": false
+    }
+  ]
+}
