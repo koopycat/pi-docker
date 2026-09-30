@@ -14,6 +14,13 @@
       ],
       "depNameTemplate": "@earendil-works/pi-coding-agent",
       "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Credential gateway image in lib/gateway.sh",
+      "customType": "regex",
+      "managerFilePatterns": ["/^lib/gateway\\.sh$/"],
+      "matchStrings": ["PI_DOCKER_GATEWAY_IMAGE:-(?<depName>[a-z0-9./-]+):(?<currentValue>[^}\\s]+)\\}"],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [

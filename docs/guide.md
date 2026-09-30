@@ -303,6 +303,7 @@ Pi needs network access to reach the configured model endpoint and may contact p
 The default runner uses Docker's `bridge` network.
 Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over an allowed network.
 The project bind mount is also readable by that code.
+The [credential gateway](#credential-gateway-experimental) keeps provider keys out of the container and removes all other network access.
 
 For offline work, disable networking explicitly:
 
@@ -322,6 +323,52 @@ PI_DOCKER_NETWORK=pi-egress-filtered \
 
 Configure the filtering network or proxy outside this repository.
 Do not assume that restricting the network protects credentials if the model endpoint itself is untrusted.
+
+### Credential gateway (experimental)
+
+With `PI_DOCKER_EGRESS=gateway`, pi never receives a provider key and has no network access except to a gateway container:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=gateway pi-project
+```
+
+For each run, `pi-project`:
+
+- creates a Docker network with `--internal` and isolated gateway mode, so it has no route off the network, no upstream DNS, and no address on the host side of the bridge;
+- starts a [Caddy](https://caddyserver.com/) reverse proxy on that network and on the default bridge, holding the real keys;
+- points pi's providers at `http://llm-proxy:8080` with the placeholder key `pi-docker-gateway`;
+- removes the gateway and the network again when pi exits.
+
+The gateway serves only fixed routes and answers everything else with `403`:
+
+| Route | Upstream | Credential | Header the gateway sets |
+|---|---|---|---|
+| `/anthropic/*` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `x-api-key` |
+| `/openai/*` | `https://api.openai.com` | `OPENAI_API_KEY` | `Authorization: Bearer` |
+| `/custom/*` | `PI_DOCKER_API_BASE_URL` | `PI_DOCKER_API_KEY` or `PI_DOCKER_API_KEY_VARIABLE` | `x-api-key` for `anthropic-messages`, otherwise `Authorization: Bearer` |
+
+The gateway always overwrites these headers and removes the other one, so pi cannot use an allowed provider with a credential of its own.
+Requests and responses are otherwise passed through unchanged and streamed without buffering.
+Credentials can come from the host environment or from `PI_DOCKER_ENV_FILE`; the gateway reads them from a temporary env-file that is deleted after the run.
+
+Limitations:
+
+- Only the three routes above are supported. Other provider keys, `PI_DOCKER_HEADERS_JSON`, and proxy variables are not passed, and `pi-project` names them in a warning.
+- Credentials stored with `/login` live in `auth.json` inside the agent volume, where the gateway cannot protect them. The bootstrap warns when `auth.json` is not empty; run `/logout` to remove them.
+- pi has no other network access: no web requests, package installs, `git fetch`, or `pi.dev` checks. The runner sets `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`.
+- pi can still send anything it reads, including project files, to the configured providers under your key.
+- Requires Docker Engine 28 or newer for isolated gateway mode. Tested on Docker Desktop for macOS and on Linux in CI; WSL2 has not been tested yet.
+
+`./verify-egress.sh` checks the gateway through the real launcher.
+An echo server stands in for a provider and a listener on the host network acts as a canary, so the check needs no credentials.
+Inside the agent container it verifies that:
+
+- external DNS, direct IPv4 and IPv6 connections, the cloud metadata address, and the echo server's own address are unreachable;
+- the host canary is unreachable through `host.docker.internal` and through the network's gateway address;
+- the gateway answers unknown routes and unconfigured providers with `403`;
+- the gateway replaces the agent's `Authorization` header with the real key and drops its `x-api-key`;
+- neither real key appears in the agent's environment or in `models.json`;
+- no gateway container or network is left behind.
 
 ## Sources
 

@@ -48,6 +48,7 @@ Set a provider key in your environment before launching Pi. The runner passes su
 - The selected project is the only host directory mounted into a normal Pi run. The host home directory, `~/.pi`, and `~/.ssh` are not mounted.
 - Pi runs as your numeric user and group, without root privileges or Linux capabilities.
 - Only supported runtime variables are passed into the container, rather than the full host environment.
+- With `PI_DOCKER_EGRESS=gateway` (experimental), provider keys stay in a separate gateway container and Pi has no other network access. See the [credential gateway](docs/guide.md#credential-gateway-experimental).
 
 Pi can read and modify files in the mounted project, including project-local agent resources. It can also read any credentials you pass to it. Docker networking defaults to `bridge`; use `PI_DOCKER_NETWORK=none` for offline runs. See the [isolation guide](docs/guide.md#isolation-properties) for the full boundary and limitations.
 
