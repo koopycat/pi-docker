@@ -6,7 +6,7 @@ The design follows pi's official [Plain Docker](https://github.com/earendil-work
 
 ## Quick start
 
-Build the image with the pinned pi version (currently `0.87.1`):
+Build the image with the pinned pi version (currently `0.99.1`):
 
 ```bash
 docker build --pull -t pi-project-sandbox .
@@ -15,7 +15,7 @@ docker build --pull -t pi-project-sandbox .
 To choose a different published version explicitly:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=0.87.1 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=0.99.1 -t pi-project-sandbox .
 ```
 
 Put this checkout on your `PATH`, for example in `~/.zshrc` or `~/.bashrc`:
@@ -254,7 +254,7 @@ The image pins pi at the `PI_VERSION` build argument's value.
 Rebuild with a deliberate version change:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=0.87.1 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=0.99.1 -t pi-project-sandbox .
 ```
 
 The named volumes persist across image updates.
