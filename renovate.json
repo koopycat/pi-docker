@@ -1,6 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "mode": "full",
   "customManagers": [
     {
       "description": "Pinned pi version in the Dockerfile and the guide",
