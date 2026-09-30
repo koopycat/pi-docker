@@ -3,8 +3,8 @@
 ## Commands
 
 - `docker build -t pi-project-sandbox .`
-- `./pi-project PROJECT_DIR [pi arguments...]`
-- `./pi-project --shell PROJECT_DIR`
+- `./pi-project [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
+- `./pi-project --shell [PROJECT_DIR]`
 - `./pi-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`

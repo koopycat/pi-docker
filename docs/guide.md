@@ -18,17 +18,28 @@ To choose a different published version explicitly:
 docker build --pull --build-arg PI_VERSION=0.87.1 -t pi-project-sandbox .
 ```
 
-Run pi against a project:
+Put this checkout on your `PATH`, for example in `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-./pi-project ~/src/my-project
+export PATH="$HOME/src/pi-docker:$PATH"
 ```
 
-Pass normal pi arguments after the project directory:
+Symlinking `pi-project` and `pi-ext` into a directory already on `PATH` works too; the scripts follow the link back to this checkout.
+
+Run pi against the project you are in:
 
 ```bash
-./pi-project ~/src/my-project --model openai/gpt-5.6-luna
-./pi-project ~/src/my-project --continue
+cd ~/src/my-project
+pi-project
+```
+
+Without a directory argument, `pi-project` uses the current directory.
+Any other directory works the same way, such as `pi-project ~/src/other-project`.
+Pass normal pi arguments after an explicit project directory; the first argument is always read as the directory, so write `pi-project . --continue`, not `pi-project --continue`:
+
+```bash
+pi-project . --model openai/gpt-5.6-luna
+pi-project . --continue
 ```
 
 The default image name is `pi-project-sandbox`.
@@ -37,7 +48,7 @@ This keeps trust decisions, sessions, auth, and extensions separate between proj
 Set `PI_DOCKER_VOLUME` only when deliberately opting into a shared volume:
 
 ```bash
-PI_DOCKER_IMAGE=my-pi PI_DOCKER_VOLUME=my-pi-agent ./pi-project ~/src/my-project
+PI_DOCKER_IMAGE=my-pi PI_DOCKER_VOLUME=my-pi-agent pi-project
 ```
 
 The wrapper refuses to run pi as root because the project bind mount must be writable by the caller's non-root UID.
@@ -57,7 +68,7 @@ mkdir -p "$ENV_DIR"
 cp .env.example "$ENV_DIR/provider.env"
 # Edit provider.env with the real endpoint and secret.
 chmod 600 "$ENV_DIR/provider.env"
-PI_DOCKER_ENV_FILE="$ENV_DIR/provider.env" ./pi-project ~/src/my-project
+PI_DOCKER_ENV_FILE="$ENV_DIR/provider.env" pi-project
 ```
 
 `pi-project` warns if the env file is not mode `600`, but does not change its permissions automatically.
@@ -77,7 +88,7 @@ The wrapper explicitly forwards supported provider variables such as `OPENAI_API
 For example:
 
 ```bash
-OPENAI_API_KEY="$OPENAI_API_KEY" ./pi-project ~/src/my-project --provider openai --model gpt-5.6-luna
+OPENAI_API_KEY="$OPENAI_API_KEY" pi-project . --provider openai --model gpt-5.6-luna
 ```
 
 The wrapper does not forward the host environment wholesale.
@@ -90,7 +101,7 @@ This runner intentionally does not copy either file from the host.
 Use the shell mode to run `/login`, edit `models.json`, or install resources into the volume:
 
 ```bash
-./pi-project --shell ~/src/my-project
+pi-project --shell
 ```
 
 The shell has the same project and agent-volume mounts, forwarded environment, non-root UID, network mode, and isolation flags as a normal run.
@@ -219,7 +230,7 @@ PI_DOCKER_API_KEY=replace-me
 EOF
 chmod 600 "$ENV_FILE"
 
-PI_DOCKER_ENV_FILE="$ENV_FILE" ./pi-project /tmp/pi-test -p "Reply with the single word hello"
+PI_DOCKER_ENV_FILE="$ENV_FILE" pi-project /tmp/pi-test -p "Reply with the single word hello"
 ```
 
 Replace the endpoint, model, and key with a real provider before running this test.
@@ -276,12 +287,13 @@ Sync to the per-project volume and inspect curated versus installed entries:
 
 ```bash
 mkdir -p ~/.pi-extensions
-./pi-ext sync ~/src/my-project
-./pi-ext list ~/src/my-project
+pi-ext sync
+pi-ext list
 ```
 
 Set `PI_EXTENSIONS_DIR` to use another curated directory.
-Set `PI_DOCKER_VOLUME` to target an explicitly shared volume without passing a project directory.
+Without a project directory, `pi-ext` uses the current directory's volume.
+Set `PI_DOCKER_VOLUME` to target an explicitly shared volume instead.
 After syncing, run `/reload` in pi to hot-reload extensions.
 Only sync extensions you trust, since they execute inside pi.
 
@@ -295,7 +307,7 @@ The project bind mount is also readable by that code.
 For offline work, disable networking explicitly:
 
 ```bash
-PI_DOCKER_NETWORK=none ./pi-project ~/src/my-project --offline
+PI_DOCKER_NETWORK=none pi-project . --offline
 ```
 
 For a restricted setup, use a Docker bridge network with egress filtering, or an HTTP proxy that permits only the model endpoint and required package/update hosts.
@@ -305,7 +317,7 @@ Pass `HTTP_PROXY` and `HTTPS_PROXY` explicitly when a proxy is required:
 PI_DOCKER_NETWORK=pi-egress-filtered \
   HTTP_PROXY=http://proxy.internal:3128 \
   HTTPS_PROXY=http://proxy.internal:3128 \
-  ./pi-project ~/src/my-project
+  pi-project
 ```
 
 Configure the filtering network or proxy outside this repository.

@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_PATH=${BASH_SOURCE[0]}
+# Follow symlinks so a link on PATH still finds lib/ in the checkout.
+while [[ -L "$SCRIPT_PATH" ]]; do
+    link=$(readlink -- "$SCRIPT_PATH")
+    [[ "$link" == /* ]] || link="$(dirname -- "$SCRIPT_PATH")/$link"
+    SCRIPT_PATH=$link
+done
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
 
@@ -14,7 +21,8 @@ Usage: pi-ext sync [PROJECT_DIR] | pi-ext list [PROJECT_DIR]
 
 The curated source is ~/.pi-extensions by default. Set PI_EXTENSIONS_DIR to
 use another source directory, or PI_DOCKER_VOLUME to select a volume directly.
-The default volume is the same per-project volume used by pi-project.
+PROJECT_DIR defaults to the current directory. The default volume is the same
+per-project volume used by pi-project.
 EOF
     exit 2
 }
@@ -31,12 +39,9 @@ if [[ -n "${PI_DOCKER_VOLUME:-}" ]]; then
         printf 'pi-ext: ignoring project directory %s because PI_DOCKER_VOLUME is set\n' "$1" >&2
     fi
 else
-    [[ $# -eq 1 ]] || {
-        printf 'pi-ext: a project directory is required unless PI_DOCKER_VOLUME is set\n' >&2
-        exit 2
-    }
-    PROJECT_DIR=$(cd -- "$1" 2>/dev/null && pwd -P) || {
-        printf 'pi-ext: project directory does not exist: %s\n' "$1" >&2
+    PROJECT_INPUT=${1:-.}
+    PROJECT_DIR=$(cd -- "$PROJECT_INPUT" 2>/dev/null && pwd -P) || {
+        printf 'pi-ext: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
         exit 1
     }
     VOLUME=$(project_volume_name "$PROJECT_DIR")

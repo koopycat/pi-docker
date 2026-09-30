@@ -4,32 +4,40 @@ Run the [Pi coding agent](https://github.com/earendil-works/pi-mono) against a p
 
 ## Quick start
 
-You need Docker Engine or Docker Desktop running.
+You need Docker Engine or Docker Desktop running. Put this checkout on your `PATH` (or symlink `pi-project` into a directory on it) and select the published image, for example in `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-docker pull ghcr.io/koopycat/pi-docker:latest
-PI_DOCKER_IMAGE=ghcr.io/koopycat/pi-docker ./pi-project /path/to/project
+export PATH="$HOME/src/pi-docker:$PATH"
+export PI_DOCKER_IMAGE=ghcr.io/koopycat/pi-docker
 ```
 
-The published image supports `linux/amd64` and `linux/arm64`. GitHub Actions updates `latest` from `main` and publishes a matching image tag for each `v*` Git tag.
+Then start Pi from the project you want it to work on:
 
-To build the image locally instead:
+```bash
+cd ~/src/my-project
+pi-project
+```
+
+Without a path, `pi-project` uses the current directory. Pass a path to use a different project, such as `pi-project ~/src/other-project`.
+
+The published image supports `linux/amd64` and `linux/arm64`. GitHub Actions updates `latest` from `main` and publishes a matching image tag for each `v*` Git tag. Docker pulls the image on first use; run `docker pull ghcr.io/koopycat/pi-docker:latest` to update it.
+
+To build the image locally instead, run this in the checkout and leave `PI_DOCKER_IMAGE` unset:
 
 ```bash
 docker build --pull -t pi-project-sandbox .
-./pi-project /path/to/project
 ```
 
-Pass Pi's usual arguments after the project path:
+Pass Pi's usual arguments after an explicit project path:
 
 ```bash
-./pi-project /path/to/project --continue
+pi-project . --continue
 ```
 
 Open a shell with the same project and Pi state mounts:
 
 ```bash
-./pi-project --shell /path/to/project
+pi-project --shell
 ```
 
 Set a provider key in your environment before launching Pi. The runner passes supported provider keys and configuration variables at runtime. For a custom API endpoint, start with [.env.example](.env.example) and follow the [provider setup guide](docs/guide.md#provider-configuration). Keep real secrets outside the repository and Docker build context.

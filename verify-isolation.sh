@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_PATH=${BASH_SOURCE[0]}
+# Follow symlinks so a link on PATH still finds lib/ in the checkout.
+while [[ -L "$SCRIPT_PATH" ]]; do
+    link=$(readlink -- "$SCRIPT_PATH")
+    [[ "$link" == /* ]] || link="$(dirname -- "$SCRIPT_PATH")/$link"
+    SCRIPT_PATH=$link
+done
+ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${ROOT_DIR}/lib/volumes.sh"
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}

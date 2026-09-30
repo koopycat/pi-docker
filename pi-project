@@ -1,19 +1,30 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+SCRIPT_PATH=${BASH_SOURCE[0]}
+# Follow symlinks so a link on PATH still finds lib/ in the checkout.
+while [[ -L "$SCRIPT_PATH" ]]; do
+    link=$(readlink -- "$SCRIPT_PATH")
+    [[ "$link" == /* ]] || link="$(dirname -- "$SCRIPT_PATH")/$link"
+    SCRIPT_PATH=$link
+done
+SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: pi-project [--shell] PROJECT_DIR [pi arguments...]
+Usage: pi-project [--shell] [PROJECT_DIR [pi arguments...]]
+
+PROJECT_DIR defaults to the current directory. Pi arguments need an explicit
+PROJECT_DIR in front of them, for example: pi-project . --continue
 
 Build the image first with:
   docker build -t pi-project-sandbox .
 
 Options:
   --shell                 Open an interactive bash with the same mounts and env.
+  -h, --help              Show this help.
 
 Environment:
   PI_DOCKER_IMAGE         Image name (default: pi-project-sandbox)
@@ -21,22 +32,29 @@ Environment:
   PI_DOCKER_ENV_FILE      Optional Docker env-file containing runtime secrets
   PI_DOCKER_NETWORK       Docker network mode (default: bridge)
 EOF
-    exit 2
+    exit "${1:-2}"
 }
 
-[[ $# -ge 1 ]] || usage
-
 SHELL_MODE=false
-if [[ "$1" == "--shell" ]]; then
-    SHELL_MODE=true
+case "${1:-}" in
+    -h | --help) usage 0 ;;
+    --shell)
+        SHELL_MODE=true
+        shift
+        ;;
+esac
+
+PROJECT_INPUT=.
+if [[ $# -gt 0 ]]; then
+    PROJECT_INPUT=$1
     shift
 fi
-[[ $# -ge 1 ]] || usage
-
-PROJECT_INPUT=$1
-shift
 if [[ ! -d "$PROJECT_INPUT" ]]; then
     printf 'pi-project: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
+    if [[ "$PROJECT_INPUT" == -* ]]; then
+        printf 'pi-project: put the project directory before pi arguments, for example: pi-project . %s\n' \
+            "$PROJECT_INPUT" >&2
+    fi
     exit 1
 fi
 if [[ "$SHELL_MODE" == true && $# -gt 0 ]]; then
