@@ -132,7 +132,17 @@ fi
 filtered_env=""
 egress_dir=""
 host_files_before=""
+tty_used=false
+# Undo terminal modes the agent may leave behind when its own restore is lost
+# or unbalanced: the kitty keyboard protocol stack (otherwise the shell gets
+# keys as CSI-u sequences such as ";1:1A"), modifyOtherKeys, mouse and focus
+# reporting, color-scheme notifications, and a hidden cursor.
+restore_terminal() {
+    [[ "$tty_used" == true && -t 1 ]] || return 0
+    printf '\033[<99u\033[>4;0m\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1004l\033[?2031l\033[?25h'
+}
 cleanup() {
+    restore_terminal
     if [[ -n "$host_files_before" ]]; then
         local host_files_after
         host_files_after=$(mktemp "${TMPDIR:-/tmp}/pi-project-files.XXXXXX")
@@ -409,6 +419,7 @@ host_files_snapshot "$PROJECT_DIR" "$host_files_before"
 
 if [[ -t 0 && -t 1 ]]; then
     args+=(--interactive --tty)
+    tty_used=true
 fi
 
 if [[ "$SHELL_MODE" == true ]]; then
