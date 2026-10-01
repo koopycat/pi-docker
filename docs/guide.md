@@ -330,7 +330,7 @@ Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CH
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=allowlist pi-project
-PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai-codex pi-project   # ChatGPT subscription via /login
+PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai pi-project   # ChatGPT subscription via /login
 ```
 
 The sidecar is [Pipelock](https://github.com/luckyPipewrench/pipelock), an HTTPS CONNECT proxy.
@@ -349,12 +349,13 @@ The allowlist is built from the configuration:
 `pi-project` prints the final list on startup.
 
 A `/login` subscription keeps its OAuth tokens in `auth.json` inside the agent volume, so pi holds them in every mode.
-Name the providers you use in `PI_DOCKER_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts:
+Name the providers you use in `PI_DOCKER_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts.
+The names are pi's provider IDs, the same keys `/login` writes to `auth.json`:
 
 | `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
 |---|---|
-| `openai-codex` (ChatGPT/Codex subscription) | `chatgpt.com`, `auth.openai.com` |
-| `openai-chatgpt` | `api.openai.com`, `auth.openai.com` |
+| `openai` (ChatGPT subscription, "Sign in with ChatGPT") | `api.openai.com`, `auth.openai.com` |
+| `openai-codex` (pi's legacy ChatGPT Plus/Pro login) | `chatgpt.com`, `auth.openai.com` |
 | `anthropic` (Claude subscription) | `api.anthropic.com`, `platform.claude.com` |
 | `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
 

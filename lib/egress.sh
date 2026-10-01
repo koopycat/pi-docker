@@ -79,20 +79,23 @@ egress_allow_host() {
 }
 
 # Add the hosts that a pi /login (OAuth) provider uses for its model API and
-# token refresh. Taken from pi-ai 0.99.1 (auth/oauth/*, providers/*); review
-# them when pi changes its providers. The set comes from the host's
+# token refresh. Names are pi provider IDs, as in auth.json. Taken from pi-ai
+# 0.99.1 (auth/oauth/*, providers/*); review them when pi changes providers. The set comes from the host's
 # environment, never from auth.json: pi controls that file and could widen
 # its own allowlist through it.
 egress_allow_login() {
     case "$1" in
+        # "Sign in with ChatGPT": the subscription token is used directly
+        # against api.openai.com.
+        openai) egress_allow_host api.openai.com && egress_allow_host auth.openai.com ;;
+        # pi's legacy ChatGPT Plus/Pro login, served from chatgpt.com.
         openai-codex) egress_allow_host chatgpt.com && egress_allow_host auth.openai.com ;;
-        openai-chatgpt) egress_allow_host api.openai.com && egress_allow_host auth.openai.com ;;
         anthropic) egress_allow_host api.anthropic.com && egress_allow_host platform.claude.com ;;
         # The model host comes from the token (individual, business, or
         # enterprise). api.github.com also exposes GitHub's whole REST API.
         github-copilot) egress_allow_host api.github.com && egress_allow_host '*.githubcopilot.com' ;;
         *)
-            printf 'pi-project: unknown PI_DOCKER_EGRESS_LOGINS entry: %s (supported: openai-codex, openai-chatgpt, anthropic, github-copilot)\n' \
+            printf 'pi-project: unknown PI_DOCKER_EGRESS_LOGINS entry: %s (supported: openai, openai-codex, anthropic, github-copilot)\n' \
                 "$1" >&2
             return 1
             ;;

@@ -225,8 +225,8 @@ Each name expands to fixed hosts in `lib/egress.sh`, taken from pi's provider co
 
 | `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
 |---|---|
-| `openai-codex` (ChatGPT/Codex subscription) | `chatgpt.com`, `auth.openai.com` |
-| `openai-chatgpt` | `api.openai.com`, `auth.openai.com` |
+| `openai` (ChatGPT subscription, "Sign in with ChatGPT") | `api.openai.com`, `auth.openai.com` |
+| `openai-codex` (pi's legacy ChatGPT Plus/Pro login) | `chatgpt.com`, `auth.openai.com` |
 | `anthropic` (Claude subscription) | `api.anthropic.com`, `platform.claude.com` |
 | `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
 

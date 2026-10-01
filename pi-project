@@ -38,7 +38,7 @@ Environment:
   PI_DOCKER_EGRESS        open (default), allowlist, or strict (docs/egress.md)
   PI_DOCKER_EGRESS_ALLOW  Extra hosts for allowlist mode, comma-separated
   PI_DOCKER_EGRESS_LOGINS /login providers for allowlist mode, comma-separated:
-                          openai-codex, openai-chatgpt, anthropic, github-copilot
+                          openai, openai-codex, anthropic, github-copilot
 EOF
     exit "${1:-2}"
 }
