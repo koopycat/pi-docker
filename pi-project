@@ -13,6 +13,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 source "${SCRIPT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/egress.sh
 source "${SCRIPT_DIR}/lib/egress.sh"
+# shellcheck source=lib/host-files.sh
+source "${SCRIPT_DIR}/lib/host-files.sh"
 
 usage() {
     cat >&2 <<'EOF'
@@ -129,7 +131,15 @@ fi
 
 filtered_env=""
 egress_dir=""
+host_files_before=""
 cleanup() {
+    if [[ -n "$host_files_before" ]]; then
+        local host_files_after
+        host_files_after=$(mktemp "${TMPDIR:-/tmp}/pi-project-files.XXXXXX")
+        host_files_snapshot "$PROJECT_DIR" "$host_files_after"
+        host_files_report "$host_files_before" "$host_files_after"
+        rm -f "$host_files_before" "$host_files_after"
+    fi
     [[ -z "$filtered_env" ]] || rm -f "$filtered_env"
     egress_stop
     [[ -z "$egress_dir" ]] || rm -rf "$egress_dir"
@@ -151,6 +161,10 @@ args=(
     --env HOME=/home/pi
     --env PI_CODING_AGENT_DIR=/home/pi/.pi/agent
 )
+# Git config and hooks stay read-only, so pi can commit but cannot plant
+# anything the host's git would run.
+host_files_mounts "$PROJECT_DIR"
+args+=(${HOST_FILE_MOUNTS[@]+"${HOST_FILE_MOUNTS[@]}"})
 
 # Runtime environment policy: only allowlisted names may enter the container.
 # This stops a mistaken or untrusted env file from injecting loader/interpreter
@@ -388,6 +402,10 @@ if [[ -n "$base_url_variable" ]]; then
     args+=(--env "${base_url_variable}=${base_url_value}")
 fi
 args+=(--network "$NETWORK")
+
+# Changes to host-executed files are reported when pi exits.
+host_files_before=$(mktemp "${TMPDIR:-/tmp}/pi-project-files.XXXXXX")
+host_files_snapshot "$PROJECT_DIR" "$host_files_before"
 
 if [[ -t 0 && -t 1 ]]; then
     args+=(--interactive --tty)

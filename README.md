@@ -45,7 +45,7 @@ Set a provider key in your environment before launching Pi. The runner passes su
 ## What stays separate
 
 - Each project gets its own persistent Docker volume for Pi settings, login credentials, sessions, trust decisions, and installed extensions.
-- The selected project is the only host directory mounted into a normal Pi run. The host home directory, `~/.pi`, and `~/.ssh` are not mounted.
+- The selected project is the only host directory mounted into a normal Pi run. Its git config and hooks are read-only, and `pi-project` reports changes to files the host runs on its own, such as `.envrc` or editor tasks. The host home directory, `~/.pi`, and `~/.ssh` are not mounted.
 - Pi runs as your numeric user and group, without root privileges or Linux capabilities.
 - Only supported runtime variables are passed into the container, rather than the full host environment.
 - With `PI_DOCKER_EGRESS=allowlist`, Pi reaches only allowlisted hosts through an SNI-checking proxy. `PI_DOCKER_EGRESS=strict` also keeps provider keys out of the container. See [egress control](docs/guide.md#egress-control) and its [architecture and decisions](docs/egress.md).

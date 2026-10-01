@@ -147,11 +147,14 @@ The per-project default avoids this collapse.
 Each normal `pi-project` run has exactly these intentional host mounts:
 
 ```text
-PROJECT_DIR (read-write)  -> /workspace
-named Docker volume       -> /home/pi/.pi/agent
+PROJECT_DIR (read-write)            -> /workspace
+PROJECT_DIR/.git/config (read-only) -> /workspace/.git/config
+PROJECT_DIR/.git/hooks (read-only)  -> /workspace/.git/hooks
+in-project core.hooksPath (read-only, if set, e.g. .husky)
+named Docker volume                 -> /home/pi/.pi/agent
 ```
 
-The project is the only host bind mount.
+The project is the only host directory mounted; the read-only entries are parts of it, described in [Files the host runs](#files-the-host-runs).
 The named volume is Docker-managed and contains pi's container-local settings, auth, trust state, resources, and sessions.
 The runner uses Docker's `volume-nocopy` mount option so image files under `/home/pi/.pi/agent` cannot seed or overwrite the volume.
 The runtime uses a caller-mapped non-root UID, drops all Linux capabilities, and enables `no-new-privileges`.
@@ -169,6 +172,29 @@ Those are Docker plumbing, not host home or project mounts.
 The project remains writable because it is bind-mounted and the container process uses the invoking user's UID and GID.
 The agent volume is prepared with the same UID and GID before pi starts.
 This relies on the container seeing the same numeric IDs as the host, which holds for a rootful Docker daemon; see Known limitations for rootless Docker and `userns-remap`.
+
+### Files the host runs
+
+pi can write anything in the project, including files that tools on the host later run on their own: git hooks, git config entries such as `core.fsmonitor` or `core.hooksPath`, `.envrc`, editor tasks, and package scripts.
+A planted file like that runs outside the container the next time you use git, enter the directory, or open the project in an editor, regardless of any egress control.
+
+`pi-project` limits this in two ways:
+
+- **Read-only git control files.** `.git/config`, `.git/hooks`, and a `core.hooksPath` directory inside the project (such as `.husky`) are mounted read-only. pi can still commit, branch, and stash, but cannot add hooks or change what git runs. Commands that write the repository config, such as `git config` or `git push -u`, fail inside the container. If `.git/hooks` does not exist, `pi-project` creates it on the host first, so it can be mounted.
+- **A change report.** Before pi starts, `pi-project` records hashes of files the host commonly runs; when pi exits, it lists every one that was added, modified, or removed:
+
+  ```text
+  pi-project: pi changed files that the host may run on its own.
+  Review them before running git, direnv, your editor, or build tools in this project:
+    added: .envrc
+    modified: package.json
+  ```
+
+  The list covers `.envrc`; `.vscode` tasks, settings, and launch files; `.devcontainer`; CI workflows; pre-commit and husky hooks; agent settings (`.claude`, `.mcp.json`, `.cursor`); `package.json` and package-manager config; `Makefile` and `justfile`; Nix and devenv files; `mise.toml`; `.gitattributes` and `.gitmodules`; and git internals that are not read-only (`.git/info`, `.git/commondir`, `.git/worktrees`, alternates, and submodule config and hooks).
+
+This is detection, not prevention, for everything except git config and hooks.
+Review reported files before running anything on the host.
+Linked worktrees and submodules whose `.git` is a file keep their git directory outside the project, so it is not mounted at all.
 
 ### Why not mount the host `.pi`
 

@@ -260,7 +260,7 @@ Cloud metadata and link-local ranges stay blocked; Pipelock does not let them be
 
 Ranked by the security review:
 
-1. **Host code execution through the project mount (critical).** pi can write files the host later runs, such as `.git/hooks`, `.git/config` (`core.fsmonitor`, `core.hooksPath`), `.vscode/tasks.json`, `.envrc`, package scripts, CI workflows, and agent hook settings. Running git or opening an IDE afterwards bypasses every network control. This is not addressed yet; see [next steps](#next-steps).
+1. **Host code execution through the project mount (critical).** pi can write files the host later runs, such as `.git/hooks`, `.git/config` (`core.fsmonitor`, `core.hooksPath`), `.vscode/tasks.json`, `.envrc`, package scripts, CI workflows, and agent hook settings. Running git or opening an IDE afterwards bypasses every network control. Partly mitigated: `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` are mounted read-only, and `pi-project` reports changes to other host-executed files after each run (see [Files the host runs](guide.md#files-the-host-runs)). Everything except git config and hooks is detected, not prevented.
 2. **Data sent out through allowed hosts (high).** pi can send anything it reads to an allowed provider: under your key in `allowlist` mode, or under an attacker's key unless `strict` is used. The same applies to every host added with `PI_DOCKER_EGRESS_ALLOW` or `PI_DOCKER_EGRESS_LOGINS`. With a `/login` subscription, pi also holds a refresh token, which stays valid beyond the session if it leaks. Sign out (`/logout`) to revoke it after untrusted work.
 3. **Encrypted Client Hello (medium, unverified).** With ECH, the outer SNI can name an allowed host while the inner one names another site on the same CDN. Pipelock has no ECH handling.
 4. **Allowlist creep (medium).** Each added host widens the path out.
@@ -293,7 +293,7 @@ Tested on Docker Desktop 29 (macOS, arm64) and Docker Engine 28 (Ubuntu, CI); WS
 
 ## Next steps
 
-1. Protect the host from the project mount: mount `.git/hooks` and `.git/config` read-only, warn about changed host-executed files after a run, and eventually let pi work in a clone that the host fetches from.
+1. Let pi work in a clone that the host fetches from, so changes are reviewed before they reach the host's working tree. Read-only git control files and the change report are in place.
 2. Test on WSL2 (NAT networking).
 3. Use scoped, spend-limited provider keys, and make the extensions directory read-only, managed through `pi-ext`.
 4. Add per-agent allowlist defaults when Claude Code, Codex, and Copilot are supported. Copilot needs `api.github.com`, which opens GitHub's write API, so it should be opt-in.

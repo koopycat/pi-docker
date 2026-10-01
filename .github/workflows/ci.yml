@@ -20,6 +20,7 @@ jobs:
           shellcheck \
             bootstrap.sh \
             lib/egress.sh \
+            lib/host-files.sh \
             lib/volumes.sh \
             pi-docker-shell \
             pi-ext \
@@ -27,6 +28,7 @@ jobs:
             setup-identity.sh \
             test.sh \
             verify-egress.sh \
+            verify-host-files.sh \
             verify-isolation-inner.sh \
             verify-isolation.sh
 
@@ -44,6 +46,9 @@ jobs:
 
       - name: Isolation check
         run: ./verify-isolation.sh .
+
+      - name: Host file protection check
+        run: ./verify-host-files.sh
 
       - name: Egress checks (allowlist and strict)
         run: |

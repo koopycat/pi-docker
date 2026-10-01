@@ -13,7 +13,10 @@ RUN apt-get update \
         ripgrep \
     && rm -rf /var/lib/apt/lists/* \
     && nss_wrapper_so=$(dpkg-query -L libnss-wrapper | grep -E '/libnss_wrapper\.so$' | head -n1) \
-    && ln -sf "$nss_wrapper_so" /usr/local/lib/libnss_wrapper.so
+    && ln -sf "$nss_wrapper_so" /usr/local/lib/libnss_wrapper.so \
+    # Docker Desktop shows the bind-mount root as owned by root, which trips
+    # git's ownership check. /workspace is always the caller's own project.
+    && git config --system --add safe.directory /workspace
 
 # Separate layer so pi upgrades do not re-run apt and vice versa. Pruning must
 # happen in this same layer, or the foreign-platform binaries stay in the image.
