@@ -28,7 +28,7 @@ RUN groupadd --gid 1001 pi \
     && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash pi \
     && mkdir -p /home/pi/.pi/agent \
     && chown -R pi:pi /home/pi/.pi \
-    && chmod 1777 /home/pi
+    && chmod 1777 /home/pi /home/pi/.pi
 
 # Root-owned so the runtime user cannot modify the entrypoint or helpers.
 COPY --chmod=0755 bootstrap.sh /usr/local/bin/pi-docker-entrypoint

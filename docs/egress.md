@@ -63,6 +63,7 @@ The allowlist is derived from the configuration:
 | `PI_DOCKER_API_BASE_URL` | that URL's host |
 | `PI_DOCKER_EGRESS_LOGINS` | the model API and token refresh hosts of each named `/login` provider, see [D11](#d11-login-providers-are-named-on-the-host) |
 | `PI_DOCKER_EGRESS_ALLOW` | each comma-separated host; `*.example.com` also matches `example.com` |
+| `PI_DOCKER_EGRESS_ALLOW_PRIVATE` | each exact host, also written to Pipelock's `trusted_domains`, so it may resolve to a private address, see [D12](#d12-private-hosts-are-exact-and-explicit) |
 
 The launcher renders a [Pipelock](https://github.com/luckyPipewrench/pipelock) config with:
 
@@ -240,6 +241,21 @@ That is fragile: OpenAI refresh tokens are single-use, and pi reads the account 
 The allowlist is never derived from `auth.json`.
 pi can write that file, so it could add a provider and widen its own allowlist for the next run.
 
+### D12: Private hosts are exact and explicit
+
+**Decision.**
+`PI_DOCKER_EGRESS_ALLOW_PRIVATE` lists exact host names that may resolve to private addresses.
+Each name goes into both `api_allowlist` and Pipelock's `trusted_domains`.
+Wildcards are refused, and the setting exists only in `allowlist` mode.
+
+**Why.**
+A model router on the local network, such as OmniRoute at a `10.x` address, is a common setup.
+Pipelock's SSRF protection refuses private destinations after DNS resolution, which is right by default: otherwise any allowlisted name could be pointed at the LAN or the host.
+Trusting a name hands its DNS owner the choice of internal address, so the exception must be narrow and deliberate.
+Cloud metadata and link-local ranges stay blocked; Pipelock does not let them be exempted.
+
+`strict` mode needs no such setting: the Caddy gateway forwards only to its configured upstreams.
+
 ## Residual risks
 
 Ranked by the security review:
@@ -258,16 +274,18 @@ Ranked by the security review:
 A listener on the host network acts as a canary.
 
 - **Both modes:** no external DNS, no direct IPv4 or IPv6, no cloud metadata, and the host canary is unreachable through `host.docker.internal` and through the network's gateway address.
-- **allowlist** (needs internet), run twice, once with `api.openai.com` allowed through `OPENAI_API_KEY` and once with `chatgpt.com` through `PI_DOCKER_EGRESS_LOGINS=openai-codex`:
+- **allowlist** (needs internet), run with `api.openai.com` allowed through `OPENAI_API_KEY`, with `chatgpt.com` through `PI_DOCKER_EGRESS_LOGINS=openai-codex`, and twice against a self-signed HTTPS server behind a `nip.io` name that resolves to a private address:
   - an allowed host works with `fetch` and through a raw tunnel;
   - other hosts are refused;
   - a mismatched SNI, a missing SNI, and plaintext inside a tunnel are refused;
   - IP literals, metadata, `host.docker.internal`, and plain `http://` are refused;
-  - the proxy's `/stats` and `/fetch` endpoints expose nothing.
+  - the proxy's `/stats` and `/fetch` endpoints expose nothing;
+  - the private host is refused with only `PI_DOCKER_EGRESS_ALLOW`, and reachable with `PI_DOCKER_EGRESS_ALLOW_PRIVATE`.
 - **strict** (offline; an echo server stands in for the provider):
   - the upstream is reachable only through the gateway;
   - the gateway answers unknown routes and unconfigured providers with `403`;
-  - the gateway replaces the agent's credentials, and no real key reaches pi's environment or `models.json`.
+  - the gateway replaces the agent's credentials, and no real key reaches pi's environment or `models.json`;
+  - the variables named by `PI_DOCKER_BASE_URL_VARIABLE` and `PI_DOCKER_API_KEY_VARIABLE` hold the gateway route and the placeholder.
 - **Afterwards:** no sidecar container or network is left behind.
 
 CI runs it on every pull request.

@@ -6,6 +6,7 @@
 #   egress_networks_create - create the per-run internal and outbound networks
 #   egress_allow_host      - add a validated host to the allowlist
 #   egress_allow_login     - add the hosts a pi /login provider needs
+#   egress_allow_private_host - add an exact host that may resolve privately
 #   allowlist_configure    - render the Pipelock config
 #   allowlist_start        - start Pipelock, the CONNECT allowlist proxy
 #   gateway_configure      - render the Caddy credential gateway config
@@ -34,6 +35,7 @@ EGRESS_NETWORK=""
 EGRESS_OUTBOUND=""
 EGRESS_SIDECAR=""
 EGRESS_HOSTS=()
+EGRESS_PRIVATE_HOSTS=()
 GATEWAY_PROVIDERS=""
 GATEWAY_CUSTOM=false
 
@@ -75,7 +77,24 @@ egress_allow_host() {
         printf 'pi-project: not an allowable host name: %s\n' "$1" >&2
         return 1
     fi
+    local known
+    for known in ${EGRESS_HOSTS[@]+"${EGRESS_HOSTS[@]}"}; do
+        [[ "$known" != "$host" ]] || return 0
+    done
     EGRESS_HOSTS+=("$host")
+}
+
+# Allow an exact host that resolves to a private address, such as a model
+# router on the local network. Pipelock otherwise refuses private and
+# loopback destinations after DNS resolution, allowlisted or not. Only exact
+# names: whoever controls a name's DNS decides where it points.
+egress_allow_private_host() {
+    if [[ "$1" == *'*'* ]]; then
+        printf 'pi-project: PI_DOCKER_EGRESS_ALLOW_PRIVATE takes exact host names, not wildcards: %s\n' "$1" >&2
+        return 1
+    fi
+    egress_allow_host "$1" || return 1
+    EGRESS_PRIVATE_HOSTS+=("$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')")
 }
 
 # Add the hosts that a pi /login (OAuth) provider uses for its model API and
@@ -117,7 +136,7 @@ allowlist_configure() {
     local dir=${1:?allowlist_configure requires a directory}
     local host
     if [[ ${#EGRESS_HOSTS[@]} -eq 0 ]]; then
-        printf 'pi-project: PI_DOCKER_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, PI_DOCKER_API_BASE_URL, PI_DOCKER_EGRESS_LOGINS, or PI_DOCKER_EGRESS_ALLOW\n' >&2
+        printf 'pi-project: PI_DOCKER_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, PI_DOCKER_API_BASE_URL, PI_DOCKER_EGRESS_LOGINS, PI_DOCKER_EGRESS_ALLOW, or PI_DOCKER_EGRESS_ALLOW_PRIVATE\n' >&2
         return 1
     fi
     {
@@ -131,6 +150,12 @@ allowlist_configure() {
         for host in "${EGRESS_HOSTS[@]}"; do
             printf '  - "%s"\n' "$host"
         done
+        if [[ ${#EGRESS_PRIVATE_HOSTS[@]} -gt 0 ]]; then
+            printf '%s\n' '# Exact hosts that may resolve to private addresses.' 'trusted_domains:'
+            for host in "${EGRESS_PRIVATE_HOSTS[@]}"; do
+                printf '  - "%s"\n' "$host"
+            done
+        fi
         printf '%s\n' \
             'forward_proxy:' \
             '  enabled: true' \

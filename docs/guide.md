@@ -291,6 +291,17 @@ pi-ext sync
 pi-ext list
 ```
 
+Each top-level entry of the curated directory becomes one extension, and pi loads a directory through its `index.ts` or `index.js`.
+An extension that imports a sibling directory, such as `../shared`, needs a small wrapper entry that carries both:
+
+```bash
+mkdir -p ~/.pi-extensions/omniroute
+ln -s ~/src/pi_extensions/model-catalogs ~/.pi-extensions/omniroute/model-catalogs
+echo 'export { default } from "./model-catalogs/omniroute/index.ts";' > ~/.pi-extensions/omniroute/index.ts
+```
+
+`pi-ext sync` copies the symlinked tree as real files, so the relative imports keep working inside the volume.
+
 Set `PI_EXTENSIONS_DIR` to use another curated directory.
 Without a project directory, `pi-ext` uses the current directory's volume.
 Set `PI_DOCKER_VOLUME` to target an explicitly shared volume instead.
@@ -344,7 +355,8 @@ The allowlist is built from the configuration:
 - `OPENAI_API_KEY` allows `api.openai.com`;
 - `PI_DOCKER_API_BASE_URL` allows that URL's host;
 - `PI_DOCKER_EGRESS_LOGINS` adds the hosts of providers you signed in to with `/login`, see below;
-- `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`.
+- `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`;
+- `PI_DOCKER_EGRESS_ALLOW_PRIVATE` adds exact hosts that resolve to a private address, see below.
 
 `pi-project` prints the final list on startup.
 
@@ -364,6 +376,11 @@ These lists come from pi 0.99.1's provider code.
 `github-copilot` also allows `api.github.com`, which exposes GitHub's whole API to the token pi holds.
 `/login` works inside the container: the browser cannot reach pi's callback there, so paste the redirect URL when pi asks for it, or choose the device-code option. It needs the same hosts, and the tokens then persist in the project's volume.
 Package registries and GitHub are not allowed by default, because they accept uploads with any token; install dependencies before the session, in `open` mode.
+
+The proxy refuses private, loopback, and link-local destinations after resolving a name, even for an allowlisted host.
+A model router or gateway on your local network, for example `router.lan` at `10.1.0.11`, therefore needs `PI_DOCKER_EGRESS_ALLOW_PRIVATE=router.lan`.
+It takes exact names only, no wildcards: whoever controls a name's DNS decides where it points, so list only names whose DNS you control.
+Cloud metadata and link-local addresses stay blocked regardless.
 
 ### strict mode
 
@@ -389,6 +406,30 @@ Limitations of strict mode:
 
 - Only the three routes above are supported. Other provider keys, `PI_DOCKER_HEADERS_JSON`, and proxy variables are not passed, and `pi-project` names them in a warning.
 - Credentials stored with `/login` live in `auth.json` inside the agent volume, where the gateway cannot protect them. The bootstrap warns when `auth.json` is not empty; run `/logout` to remove them.
+
+### Extension providers
+
+Some providers come from a pi extension rather than from pi itself, for example a catalog extension for a model router such as OmniRoute.
+Such an extension reads its endpoint and key from variables of its own, such as `OMNIROUTE_BASE_URL` and `OMNIROUTE_API_KEY`.
+Name them, and let `pi-project` fill them in for each mode:
+
+```bash
+# ~/.config/pi-docker/omniroute.env (chmod 600)
+PI_DOCKER_API_BASE_URL=https://omniroute.example.lan/v1
+PI_DOCKER_BASE_URL_VARIABLE=OMNIROUTE_BASE_URL
+PI_DOCKER_API_KEY_VARIABLE=OMNIROUTE_API_KEY
+OMNIROUTE_API_KEY=replace-me
+```
+
+| Mode | `OMNIROUTE_BASE_URL` inside pi | `OMNIROUTE_API_KEY` inside pi |
+|---|---|---|
+| `open` | the real URL | the real key |
+| `allowlist` | the real URL; its host is allowlisted automatically | the real key |
+| `strict` | `http://llm-proxy:8080/custom`, the gateway's custom route | the placeholder `pi-docker-gateway`; the gateway sends the real key upstream |
+
+Without `PI_DOCKER_PROVIDER` and `PI_DOCKER_MODEL`, the bootstrap registers no provider of its own, so only the extension's provider appears.
+Install the extension into the project's volume with `pi-ext` (see [Curated host extensions](#curated-host-extensions)).
+If the router resolves to a private address, add `PI_DOCKER_EGRESS_ALLOW_PRIVATE` with its host for `allowlist` mode.
 
 ### What egress control does not cover
 
