@@ -19,7 +19,7 @@
 - Only allowlisted environment names enter the container; `PI_DOCKER_ENV_FILE` is filtered through the same allowlist and `PI_DOCKER_API_KEY_VARIABLE` must name an allowed variable.
 - Secrets enter at runtime through a Docker env-file or explicitly forwarded variables.
 - `PI_DOCKER_EGRESS=allowlist|strict` puts pi only on a per-run `--internal` network in isolated gateway mode; its one peer is a sidecar on a per-run outbound bridge (never the default bridge). Design and decisions live in `docs/egress.md`; update its decision records when changing `lib/egress.sh`.
-- allowlist mode: Pipelock must keep `sni_verification` and `sni_require_tls` on; `HTTP_PROXY` stays unset so cleartext fails closed.
+- allowlist mode: Pipelock must keep `sni_verification` and `sni_require_tls` on; `HTTP_PROXY` stays unset so cleartext fails closed. Allowed hosts come only from the host side (keys, base URL, `PI_DOCKER_EGRESS_LOGINS`, `PI_DOCKER_EGRESS_ALLOW`), never from agent-writable state such as `auth.json`.
 - strict mode: pi receives no provider credentials; the Caddy gateway always overwrites auth headers and answers unknown routes with 403.
 - Sidecar images are pinned by digest in `lib/egress.sh` and never automerged. Any change there must keep `./verify-egress.sh` passing.
 - Do not mount the host home directory, `~/.pi`, or `~/.ssh`.

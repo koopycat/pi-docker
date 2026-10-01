@@ -315,11 +315,11 @@ PI_DOCKER_NETWORK=none pi-project . --offline
 `PI_DOCKER_EGRESS` restricts what pi can reach.
 [Egress control: architecture and decisions](egress.md) explains the design, the alternatives that were rejected, and the remaining risks.
 
-| Mode | pi holds the provider key | pi can reach |
-|---|---|---|
-| `open` (default) | yes | the internet |
-| `allowlist` | yes | only allowlisted hosts over HTTPS |
-| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway |
+| Mode | pi holds the provider credential | pi can reach | `/login` subscriptions |
+|---|---|---|---|
+| `open` (default) | yes | the internet | yes |
+| `allowlist` | yes | only allowlisted hosts over HTTPS | yes, with `PI_DOCKER_EGRESS_LOGINS` |
+| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway | no, API keys only |
 
 Both restricted modes put pi on a per-run Docker network created with `--internal` and isolated gateway mode, so it has no route off that network, no upstream DNS, and no address on the host side of the bridge.
 The only other member is a sidecar container, which is pi's only way out.
@@ -330,6 +330,7 @@ Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CH
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=allowlist pi-project
+PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai-codex pi-project   # ChatGPT subscription via /login
 ```
 
 The sidecar is [Pipelock](https://github.com/luckyPipewrench/pipelock), an HTTPS CONNECT proxy.
@@ -342,10 +343,25 @@ The allowlist is built from the configuration:
 - `ANTHROPIC_API_KEY` allows `api.anthropic.com`;
 - `OPENAI_API_KEY` allows `api.openai.com`;
 - `PI_DOCKER_API_BASE_URL` allows that URL's host;
+- `PI_DOCKER_EGRESS_LOGINS` adds the hosts of providers you signed in to with `/login`, see below;
 - `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`.
 
 `pi-project` prints the final list on startup.
-A provider you signed in to with `/login` needs its API host in `PI_DOCKER_EGRESS_ALLOW`, along with any host its token refresh uses.
+
+A `/login` subscription keeps its OAuth tokens in `auth.json` inside the agent volume, so pi holds them in every mode.
+Name the providers you use in `PI_DOCKER_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts:
+
+| `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
+|---|---|
+| `openai-codex` (ChatGPT/Codex subscription) | `chatgpt.com`, `auth.openai.com` |
+| `openai-chatgpt` | `api.openai.com`, `auth.openai.com` |
+| `anthropic` (Claude subscription) | `api.anthropic.com`, `platform.claude.com` |
+| `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
+
+These lists come from pi 0.99.1's provider code.
+`pi-project` never reads them from `auth.json`, because pi can edit that file and would otherwise choose its own allowlist.
+`github-copilot` also allows `api.github.com`, which exposes GitHub's whole API to the token pi holds.
+`/login` works inside the container: the browser cannot reach pi's callback there, so paste the redirect URL when pi asks for it, or choose the device-code option. It needs the same hosts, and the tokens then persist in the project's volume.
 Package registries and GitHub are not allowed by default, because they accept uploads with any token; install dependencies before the session, in `open` mode.
 
 ### strict mode

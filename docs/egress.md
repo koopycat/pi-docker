@@ -16,11 +16,11 @@ Untrusted: the agent process, every process it starts, the mounted project's con
 
 `PI_DOCKER_EGRESS` selects one of three modes.
 
-| Mode | pi holds the provider key | pi can reach | Use when |
+| Mode | pi holds the provider credential | pi can reach | Use when |
 |---|---|---|---|
 | `open` (default) | yes | the internet through Docker's `bridge` network | compatibility; no egress control |
-| `allowlist` | yes | only allowlisted hosts over HTTPS, through a CONNECT proxy | you want egress control and accept that pi sees its key |
-| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway | the key itself must stay out of the sandbox |
+| `allowlist` | yes | only allowlisted hosts over HTTPS, through a CONNECT proxy | you want egress control and accept that pi sees its credential, including `/login` subscriptions |
+| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway | an API key must stay out of the sandbox |
 
 ## Architecture
 
@@ -61,6 +61,7 @@ The allowlist is derived from the configuration:
 | `ANTHROPIC_API_KEY` | `api.anthropic.com` |
 | `OPENAI_API_KEY` | `api.openai.com` |
 | `PI_DOCKER_API_BASE_URL` | that URL's host |
+| `PI_DOCKER_EGRESS_LOGINS` | the model API and token refresh hosts of each named `/login` provider, see [D11](#d11-login-providers-are-named-on-the-host) |
 | `PI_DOCKER_EGRESS_ALLOW` | each comma-separated host; `*.example.com` also matches `example.com` |
 
 The launcher renders a [Pipelock](https://github.com/luckyPipewrench/pipelock) config with:
@@ -216,12 +217,35 @@ Registries and GitHub accept uploads with any token: `npm publish`, gists, pushe
 Allowing them opens a path out as well as a source of injected content.
 Install dependencies in `open` mode, or from a read-only mirror, before an `allowlist` session.
 
+### D11: Login providers are named on the host
+
+**Decision.**
+`/login` (OAuth) subscriptions are supported in `allowlist` mode only, through `PI_DOCKER_EGRESS_LOGINS`.
+Each name expands to fixed hosts in `lib/egress.sh`, taken from pi's provider code:
+
+| `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
+|---|---|
+| `openai-codex` (ChatGPT/Codex subscription) | `chatgpt.com`, `auth.openai.com` |
+| `openai-chatgpt` | `api.openai.com`, `auth.openai.com` |
+| `anthropic` (Claude subscription) | `api.anthropic.com`, `platform.claude.com` |
+| `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
+
+`strict` mode rejects login providers.
+
+**Why.**
+pi stores OAuth tokens in `auth.json` in the agent volume and refreshes them itself, so they are inside the sandbox in every mode.
+A gateway could hold them only by owning the refresh flow.
+That is fragile: OpenAI refresh tokens are single-use, and pi reads the account ID from the access token.
+
+The allowlist is never derived from `auth.json`.
+pi can write that file, so it could add a provider and widen its own allowlist for the next run.
+
 ## Residual risks
 
 Ranked by the security review:
 
 1. **Host code execution through the project mount (critical).** pi can write files the host later runs, such as `.git/hooks`, `.git/config` (`core.fsmonitor`, `core.hooksPath`), `.vscode/tasks.json`, `.envrc`, package scripts, CI workflows, and agent hook settings. Running git or opening an IDE afterwards bypasses every network control. This is not addressed yet; see [next steps](#next-steps).
-2. **Data sent out through allowed hosts (high).** pi can send anything it reads to an allowed provider: under your key in `allowlist` mode, or under an attacker's key unless `strict` is used. The same applies to every host added with `PI_DOCKER_EGRESS_ALLOW`.
+2. **Data sent out through allowed hosts (high).** pi can send anything it reads to an allowed provider: under your key in `allowlist` mode, or under an attacker's key unless `strict` is used. The same applies to every host added with `PI_DOCKER_EGRESS_ALLOW` or `PI_DOCKER_EGRESS_LOGINS`. With a `/login` subscription, pi also holds a refresh token, which stays valid beyond the session if it leaks. Sign out (`/logout`) to revoke it after untrusted work.
 3. **Encrypted Client Hello (medium, unverified).** With ECH, the outer SNI can name an allowed host while the inner one names another site on the same CDN. Pipelock has no ECH handling.
 4. **Allowlist creep (medium).** Each added host widens the path out.
 5. **Agent-volume tampering (medium).** Extensions, settings, and trust decisions persist in the agent volume and run again in the next session.
@@ -234,7 +258,7 @@ Ranked by the security review:
 A listener on the host network acts as a canary.
 
 - **Both modes:** no external DNS, no direct IPv4 or IPv6, no cloud metadata, and the host canary is unreachable through `host.docker.internal` and through the network's gateway address.
-- **allowlist** (needs internet; uses `api.openai.com`):
+- **allowlist** (needs internet), run twice, once with `api.openai.com` allowed through `OPENAI_API_KEY` and once with `chatgpt.com` through `PI_DOCKER_EGRESS_LOGINS=openai-codex`:
   - an allowed host works with `fetch` and through a raw tunnel;
   - other hosts are refused;
   - a mismatched SNI, a missing SNI, and plaintext inside a tunnel are refused;

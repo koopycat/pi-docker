@@ -5,6 +5,7 @@
 # Source this file from pi-project. It defines:
 #   egress_networks_create - create the per-run internal and outbound networks
 #   egress_allow_host      - add a validated host to the allowlist
+#   egress_allow_login     - add the hosts a pi /login provider needs
 #   allowlist_configure    - render the Pipelock config
 #   allowlist_start        - start Pipelock, the CONNECT allowlist proxy
 #   gateway_configure      - render the Caddy credential gateway config
@@ -77,6 +78,27 @@ egress_allow_host() {
     EGRESS_HOSTS+=("$host")
 }
 
+# Add the hosts that a pi /login (OAuth) provider uses for its model API and
+# token refresh. Taken from pi-ai 0.99.1 (auth/oauth/*, providers/*); review
+# them when pi changes its providers. The set comes from the host's
+# environment, never from auth.json: pi controls that file and could widen
+# its own allowlist through it.
+egress_allow_login() {
+    case "$1" in
+        openai-codex) egress_allow_host chatgpt.com && egress_allow_host auth.openai.com ;;
+        openai-chatgpt) egress_allow_host api.openai.com && egress_allow_host auth.openai.com ;;
+        anthropic) egress_allow_host api.anthropic.com && egress_allow_host platform.claude.com ;;
+        # The model host comes from the token (individual, business, or
+        # enterprise). api.github.com also exposes GitHub's whole REST API.
+        github-copilot) egress_allow_host api.github.com && egress_allow_host '*.githubcopilot.com' ;;
+        *)
+            printf 'pi-project: unknown PI_DOCKER_EGRESS_LOGINS entry: %s (supported: openai-codex, openai-chatgpt, anthropic, github-copilot)\n' \
+                "$1" >&2
+            return 1
+            ;;
+    esac
+}
+
 # Print the host of an http(s) URL, or fail.
 url_host() {
     if [[ ! "$1" =~ ^https?://([^/?#:@[:space:]]+)(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
@@ -92,7 +114,7 @@ allowlist_configure() {
     local dir=${1:?allowlist_configure requires a directory}
     local host
     if [[ ${#EGRESS_HOSTS[@]} -eq 0 ]]; then
-        printf 'pi-project: PI_DOCKER_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, PI_DOCKER_API_BASE_URL, or PI_DOCKER_EGRESS_ALLOW\n' >&2
+        printf 'pi-project: PI_DOCKER_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, PI_DOCKER_API_BASE_URL, PI_DOCKER_EGRESS_LOGINS, or PI_DOCKER_EGRESS_ALLOW\n' >&2
         return 1
     fi
     {
@@ -193,7 +215,9 @@ gateway_configure() {
     GATEWAY_PROVIDERS=${GATEWAY_PROVIDERS%,}
 
     if [[ -z "$routes" ]]; then
-        printf 'pi-project: PI_DOCKER_EGRESS=strict needs ANTHROPIC_API_KEY, OPENAI_API_KEY, or a custom provider (PI_DOCKER_API_BASE_URL)\n' >&2
+        printf '%s\n' \
+            'pi-project: PI_DOCKER_EGRESS=strict needs ANTHROPIC_API_KEY, OPENAI_API_KEY, or a custom provider (PI_DOCKER_API_BASE_URL).' \
+            'pi-project: /login (subscription) credentials cannot stay outside the sandbox; use PI_DOCKER_EGRESS=allowlist with PI_DOCKER_EGRESS_LOGINS instead.' >&2
         return 1
     fi
 

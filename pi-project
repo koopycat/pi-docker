@@ -37,6 +37,8 @@ Environment:
   PI_DOCKER_NETWORK       Docker network mode (default: bridge)
   PI_DOCKER_EGRESS        open (default), allowlist, or strict (docs/egress.md)
   PI_DOCKER_EGRESS_ALLOW  Extra hosts for allowlist mode, comma-separated
+  PI_DOCKER_EGRESS_LOGINS /login providers for allowlist mode, comma-separated:
+                          openai-codex, openai-chatgpt, anthropic, github-copilot
 EOF
     exit "${1:-2}"
 }
@@ -79,6 +81,10 @@ IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-$(project_volume_name "$PROJECT_DIR")}
 NETWORK=${PI_DOCKER_NETWORK:-bridge}
 EGRESS=${PI_DOCKER_EGRESS:-open}
+if [[ -n "${PI_DOCKER_EGRESS_LOGINS:-}" && "$EGRESS" != allowlist ]]; then
+    printf 'pi-project: PI_DOCKER_EGRESS_LOGINS needs PI_DOCKER_EGRESS=allowlist (strict mode cannot keep /login credentials out of the sandbox)\n' >&2
+    exit 2
+fi
 case "$EGRESS" in
     open) ;;
     allowlist | strict)
@@ -296,6 +302,10 @@ if [[ "$EGRESS" != open ]]; then
             egress_allow_host "$custom_host"
         fi
         # read -a splits without glob expansion, so *.example.com stays literal.
+        IFS=$', \t' read -r -a logins <<<"${PI_DOCKER_EGRESS_LOGINS:-}"
+        for login in ${logins[@]+"${logins[@]}"}; do
+            egress_allow_login "$login"
+        done
         IFS=$', \t' read -r -a extra_hosts <<<"${PI_DOCKER_EGRESS_ALLOW:-}"
         for host in ${extra_hosts[@]+"${extra_hosts[@]}"}; do
             egress_allow_host "$host"

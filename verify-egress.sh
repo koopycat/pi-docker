@@ -5,8 +5,10 @@ set -Eeuo pipefail
 # real launcher: pi-project --exec runs lib/egress-probe.mjs inside the agent
 # container. A canary on the host network must stay unreachable in both modes.
 #
-# allowlist needs internet access: it opens real tunnels to api.openai.com,
-#   a Cloudflare-hosted name, which also exercises SNI-mismatch refusal.
+# allowlist needs internet access: it opens real tunnels to api.openai.com
+#   (allowed through OPENAI_API_KEY) and chatgpt.com (allowed through
+#   PI_DOCKER_EGRESS_LOGINS=openai-codex). Both are Cloudflare-hosted names,
+#   which also exercises SNI-mismatch refusal.
 # strict needs none: an echo server stands in for the provider.
 #
 # Usage: ./verify-egress.sh [allowlist|strict]...   (default: both)
@@ -23,7 +25,6 @@ IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-pi-project-egress-check}
 MODES=("$@")
 [[ ${#MODES[@]} -gt 0 ]] || MODES=(allowlist strict)
-ALLOWED_HOST=api.openai.com
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
@@ -70,7 +71,7 @@ fail() {
 probe() {
     env -u PI_DOCKER_ENV_FILE -u PI_DOCKER_NETWORK -u PI_DOCKER_API_KEY_VARIABLE \
         -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u PI_DOCKER_API_BASE_URL -u PI_DOCKER_BASE_URL \
-        -u PI_DOCKER_EGRESS_ALLOW \
+        -u PI_DOCKER_EGRESS_ALLOW -u PI_DOCKER_EGRESS_LOGINS \
         PI_DOCKER_IMAGE="$IMAGE" \
         PI_DOCKER_VOLUME="$VOLUME" \
         "$@" \
@@ -91,10 +92,10 @@ expect_checks() {
 section() { grep "^$2 " <<<"$1" || true; }
 
 check_allowlist() {
-    printf '== allowlist (Pipelock CONNECT proxy, needs internet)\n'
+    printf '== allowlist with an API key (Pipelock CONNECT proxy, needs internet)\n'
     local key output env_line
     key="sk-dummy-$(random_token)"
-    probe_args=(allowlist "$canary_port" "$ALLOWED_HOST")
+    probe_args=(allowlist "$canary_port" api.openai.com)
     output=$(probe PI_DOCKER_EGRESS=allowlist OPENAI_API_KEY="$key")
     expect_checks "$output" 19
     env_line=$(section "$output" ENV)
@@ -102,6 +103,12 @@ check_allowlist() {
     [[ "$env_line" == *"\"OPENAI_API_KEY\":\"${key}\""* ]] || fail "allowlist mode did not forward the provider key"
     [[ "$env_line" == *'"HTTPS_PROXY":"http://egress:8888"'* ]] || fail "HTTPS_PROXY is not set to the egress proxy"
     [[ "$env_line" != *'"HTTP_PROXY"'* ]] || fail "HTTP_PROXY is set; plain http:// should have no route"
+
+    # A /login provider: the hosts come from PI_DOCKER_EGRESS_LOGINS alone.
+    printf '== allowlist with a /login provider (openai-codex)\n'
+    probe_args=(allowlist "$canary_port" chatgpt.com)
+    output=$(probe PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai-codex)
+    expect_checks "$output" 19
 }
 
 check_strict() {
