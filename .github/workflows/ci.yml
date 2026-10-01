@@ -19,7 +19,7 @@ jobs:
         run: |
           shellcheck \
             bootstrap.sh \
-            lib/gateway.sh \
+            lib/egress.sh \
             lib/volumes.sh \
             pi-docker-shell \
             pi-ext \
@@ -45,7 +45,7 @@ jobs:
       - name: Isolation check
         run: ./verify-isolation.sh .
 
-      - name: Credential gateway check
+      - name: Egress checks (allowlist and strict)
         run: |
           docker version --format 'Docker Engine {{.Server.Version}}'
           ./verify-egress.sh

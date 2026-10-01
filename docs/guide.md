@@ -297,13 +297,12 @@ Set `PI_DOCKER_VOLUME` to target an explicitly shared volume instead.
 After syncing, run `/reload` in pi to hot-reload extensions.
 Only sync extensions you trust, since they execute inside pi.
 
-## Network notes and egress reality
+## Network notes and egress control
 
 Pi needs network access to reach the configured model endpoint and may contact pi.dev for update checks, package checks, or install telemetry unless disabled.
-The default runner uses Docker's `bridge` network.
-Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over an allowed network.
+By default the runner uses Docker's `bridge` network, so pi can reach the whole internet.
+Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over the network.
 The project bind mount is also readable by that code.
-The [credential gateway](#credential-gateway-experimental) keeps provider keys out of the container and removes all other network access.
 
 For offline work, disable networking explicitly:
 
@@ -311,34 +310,52 @@ For offline work, disable networking explicitly:
 PI_DOCKER_NETWORK=none pi-project . --offline
 ```
 
-For a restricted setup, use a Docker bridge network with egress filtering, or an HTTP proxy that permits only the model endpoint and required package/update hosts.
-Pass `HTTP_PROXY` and `HTTPS_PROXY` explicitly when a proxy is required:
+### Egress control
+
+`PI_DOCKER_EGRESS` restricts what pi can reach.
+[Egress control: architecture and decisions](egress.md) explains the design, the alternatives that were rejected, and the remaining risks.
+
+| Mode | pi holds the provider key | pi can reach |
+|---|---|---|
+| `open` (default) | yes | the internet |
+| `allowlist` | yes | only allowlisted hosts over HTTPS |
+| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway |
+
+Both restricted modes put pi on a per-run Docker network created with `--internal` and isolated gateway mode, so it has no route off that network, no upstream DNS, and no address on the host side of the bridge.
+The only other member is a sidecar container, which is pi's only way out.
+The sidecar and both networks are removed when pi exits.
+Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`, and cannot be combined with `PI_DOCKER_NETWORK`.
+
+### allowlist mode
 
 ```bash
-PI_DOCKER_NETWORK=pi-egress-filtered \
-  HTTP_PROXY=http://proxy.internal:3128 \
-  HTTPS_PROXY=http://proxy.internal:3128 \
-  pi-project
+ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=allowlist pi-project
 ```
 
-Configure the filtering network or proxy outside this repository.
-Do not assume that restricting the network protects credentials if the model endpoint itself is untrusted.
+The sidecar is [Pipelock](https://github.com/luckyPipewrench/pipelock), an HTTPS CONNECT proxy.
+pi gets `HTTPS_PROXY=http://egress:8888` and `NODE_USE_ENV_PROXY=1`.
+The proxy allows a tunnel only to an allowlisted host, and only when the TLS handshake inside names that same host.
+It refuses IP literals, private and metadata addresses, and plain `http://` requests.
 
-### Credential gateway (experimental)
+The allowlist is built from the configuration:
 
-With `PI_DOCKER_EGRESS=gateway`, pi never receives a provider key and has no network access except to a gateway container:
+- `ANTHROPIC_API_KEY` allows `api.anthropic.com`;
+- `OPENAI_API_KEY` allows `api.openai.com`;
+- `PI_DOCKER_API_BASE_URL` allows that URL's host;
+- `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`.
+
+`pi-project` prints the final list on startup.
+A provider you signed in to with `/login` needs its API host in `PI_DOCKER_EGRESS_ALLOW`, along with any host its token refresh uses.
+Package registries and GitHub are not allowed by default, because they accept uploads with any token; install dependencies before the session, in `open` mode.
+
+### strict mode
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=gateway pi-project
+ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=strict pi-project
 ```
 
-For each run, `pi-project`:
-
-- creates a Docker network with `--internal` and isolated gateway mode, so it has no route off the network, no upstream DNS, and no address on the host side of the bridge;
-- starts a [Caddy](https://caddyserver.com/) reverse proxy on that network and on the default bridge, holding the real keys;
-- points pi's providers at `http://llm-proxy:8080` with the placeholder key `pi-docker-gateway`;
-- removes the gateway and the network again when pi exits.
-
+The sidecar is a [Caddy](https://caddyserver.com/) reverse proxy that holds the real keys.
+The bootstrap points pi's providers at `http://llm-proxy:8080` with the placeholder key `pi-docker-gateway`.
 The gateway serves only fixed routes and answers everything else with `403`:
 
 | Route | Upstream | Credential | Header the gateway sets |
@@ -347,28 +364,33 @@ The gateway serves only fixed routes and answers everything else with `403`:
 | `/openai/*` | `https://api.openai.com` | `OPENAI_API_KEY` | `Authorization: Bearer` |
 | `/custom/*` | `PI_DOCKER_API_BASE_URL` | `PI_DOCKER_API_KEY` or `PI_DOCKER_API_KEY_VARIABLE` | `x-api-key` for `anthropic-messages`, otherwise `Authorization: Bearer` |
 
-The gateway always overwrites these headers and removes the other one, so pi cannot use an allowed provider with a credential of its own.
+The gateway always overwrites these headers and removes the other one, so pi cannot use an allowed provider with a credential of its own, for example to upload data to a provider's file API under an attacker's account.
 Requests and responses are otherwise passed through unchanged and streamed without buffering.
 Credentials can come from the host environment or from `PI_DOCKER_ENV_FILE`; the gateway reads them from a temporary env-file that is deleted after the run.
 
-Limitations:
+Limitations of strict mode:
 
 - Only the three routes above are supported. Other provider keys, `PI_DOCKER_HEADERS_JSON`, and proxy variables are not passed, and `pi-project` names them in a warning.
 - Credentials stored with `/login` live in `auth.json` inside the agent volume, where the gateway cannot protect them. The bootstrap warns when `auth.json` is not empty; run `/logout` to remove them.
-- pi has no other network access: no web requests, package installs, `git fetch`, or `pi.dev` checks. The runner sets `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`.
-- pi can still send anything it reads, including project files, to the configured providers under your key.
-- Requires Docker Engine 28 or newer for isolated gateway mode. Tested on Docker Desktop for macOS and on Linux in CI; WSL2 has not been tested yet.
 
-`./verify-egress.sh` checks the gateway through the real launcher.
-An echo server stands in for a provider and a listener on the host network acts as a canary, so the check needs no credentials.
-Inside the agent container it verifies that:
+### What egress control does not cover
 
-- external DNS, direct IPv4 and IPv6 connections, the cloud metadata address, and the echo server's own address are unreachable;
-- the host canary is unreachable through `host.docker.internal` and through the network's gateway address;
-- the gateway answers unknown routes and unconfigured providers with `403`;
-- the gateway replaces the agent's `Authorization` header with the real key and drops its `x-api-key`;
-- neither real key appears in the agent's environment or in `models.json`;
-- no gateway container or network is left behind.
+- pi can still send anything it reads, including project files, to the hosts it may reach.
+- pi can write files in the project that the host later runs, such as git hooks, `.git/config`, editor tasks, and package scripts. Review changes before running git commands or opening the project in an IDE. See [residual risks](egress.md#residual-risks).
+- WSL2 has not been tested yet.
+
+### Verify egress control
+
+```bash
+./verify-egress.sh            # both modes
+./verify-egress.sh strict     # offline
+./verify-egress.sh allowlist  # needs internet
+```
+
+The check runs a probe inside pi's container through the real launcher, with a listener on the host network as a canary.
+It fails if pi can resolve external names, connect directly to the internet, the metadata address, or the host, or reach anything the sidecar should refuse.
+In strict mode it also checks that no real key reaches pi and that the gateway replaces pi's credentials.
+[Verification](egress.md#verification) lists every check.
 
 ## Sources
 

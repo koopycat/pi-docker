@@ -11,8 +11,8 @@ done
 SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
-# shellcheck source=lib/gateway.sh
-source "${SCRIPT_DIR}/lib/gateway.sh"
+# shellcheck source=lib/egress.sh
+source "${SCRIPT_DIR}/lib/egress.sh"
 
 usage() {
     cat >&2 <<'EOF'
@@ -35,8 +35,8 @@ Environment:
   PI_DOCKER_VOLUME        Agent volume (default: per-project volume)
   PI_DOCKER_ENV_FILE      Optional Docker env-file containing runtime secrets
   PI_DOCKER_NETWORK       Docker network mode (default: bridge)
-  PI_DOCKER_EGRESS        open (default) or gateway: keep provider keys in a
-                          proxy container and give pi no other network access
+  PI_DOCKER_EGRESS        open (default), allowlist, or strict (docs/egress.md)
+  PI_DOCKER_EGRESS_ALLOW  Extra hosts for allowlist mode, comma-separated
 EOF
     exit "${1:-2}"
 }
@@ -81,14 +81,14 @@ NETWORK=${PI_DOCKER_NETWORK:-bridge}
 EGRESS=${PI_DOCKER_EGRESS:-open}
 case "$EGRESS" in
     open) ;;
-    gateway)
+    allowlist | strict)
         if [[ -n "${PI_DOCKER_NETWORK:-}" ]]; then
-            printf 'pi-project: PI_DOCKER_NETWORK cannot be combined with PI_DOCKER_EGRESS=gateway\n' >&2
+            printf 'pi-project: PI_DOCKER_NETWORK cannot be combined with PI_DOCKER_EGRESS=%s\n' "$EGRESS" >&2
             exit 2
         fi
         ;;
     *)
-        printf 'pi-project: PI_DOCKER_EGRESS must be open or gateway, got: %s\n' "$EGRESS" >&2
+        printf 'pi-project: PI_DOCKER_EGRESS must be open, allowlist, or strict, got: %s\n' "$EGRESS" >&2
         exit 2
         ;;
 esac
@@ -112,11 +112,11 @@ if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
 fi
 
 filtered_env=""
-gateway_dir=""
+egress_dir=""
 cleanup() {
     [[ -z "$filtered_env" ]] || rm -f "$filtered_env"
-    gateway_stop
-    [[ -z "$gateway_dir" ]] || rm -rf "$gateway_dir"
+    egress_stop
+    [[ -z "$egress_dir" ]] || rm -rf "$egress_dir"
 }
 trap cleanup EXIT
 
@@ -155,7 +155,7 @@ env_allowlist=(
     HTTP_PROXY HTTPS_PROXY NO_PROXY PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY
     PI_CACHE_RETENTION
 )
-# In gateway mode the agent gets only non-secret provider settings; the
+# In strict mode the agent gets only non-secret provider settings; the
 # credentials and upstream URL go to the gateway instead.
 gateway_agent_allowlist=(
     PI_DOCKER_PROVIDER PI_DOCKER_MODEL PI_DOCKER_MODEL_ID PI_DOCKER_MODEL_NAME
@@ -200,10 +200,10 @@ if [[ -n "$key_variable" ]]; then
         printf 'pi-project: PI_DOCKER_API_KEY_VARIABLE is not an allowed variable name: %s\n' "$key_variable" >&2
         exit 2
     fi
-    [[ "$EGRESS" == gateway ]] || env_allowlist+=("$key_variable")
+    [[ "$EGRESS" == strict ]] || env_allowlist+=("$key_variable")
 fi
 
-# Names the gateway reads; they are expected in the env and never reach pi.
+# Names the strict gateway reads; they are expected in the env and never reach pi.
 gateway_consumed=(
     ANTHROPIC_API_KEY OPENAI_API_KEY PI_DOCKER_API_BASE_URL PI_DOCKER_BASE_URL
     PI_DOCKER_API_KEY_VARIABLE "${key_variable:-PI_DOCKER_API_KEY}"
@@ -227,7 +227,16 @@ runtime_value() {
         printf '%s' "${value%$'\r'}"
     fi
 }
-if [[ "$EGRESS" == gateway ]]; then
+# Settings the egress modes manage themselves.
+egress_managed=(HTTP_PROXY HTTPS_PROXY NO_PROXY PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY)
+if [[ "$EGRESS" == allowlist ]]; then
+    kept=()
+    for name in "${env_allowlist[@]}"; do
+        name_in_list "$name" "${egress_managed[@]}" || kept+=("$name")
+    done
+    env_allowlist=("${kept[@]}")
+fi
+if [[ "$EGRESS" == strict ]]; then
     unsupported=()
     for name in "${env_allowlist[@]}"; do
         if [[ -n "${!name+x}" ]] && ! name_in_list "$name" "${gateway_agent_allowlist[@]}" "${gateway_consumed[@]}"; then
@@ -235,7 +244,7 @@ if [[ "$EGRESS" == gateway ]]; then
         fi
     done
     if [[ ${#unsupported[@]} -gt 0 ]]; then
-        printf 'pi-project: warning: not passed with PI_DOCKER_EGRESS=gateway: %s\n' "${unsupported[*]}" >&2
+        printf 'pi-project: warning: not passed with PI_DOCKER_EGRESS=strict: %s\n' "${unsupported[*]}" >&2
     fi
     env_allowlist=("${gateway_agent_allowlist[@]}")
 fi
@@ -255,7 +264,7 @@ if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
         value=${BASH_REMATCH[2]}
         if env_name_is_allowed "$name"; then
             printf '%s=%s\n' "$name" "$value" >>"$filtered_env"
-        elif [[ "$EGRESS" == gateway ]] && name_in_list "$name" "${gateway_consumed[@]}"; then
+        elif [[ "$EGRESS" == strict ]] && name_in_list "$name" "${gateway_consumed[@]}"; then
             continue
         else
             dropped+=("$name")
@@ -274,32 +283,55 @@ for name in "${env_allowlist[@]}"; do
     fi
 done
 
-if [[ "$EGRESS" == gateway ]]; then
-    gateway_dir=$(mktemp -d "${TMPDIR:-/tmp}/pi-project-gateway.XXXXXX")
-    GW_ANTHROPIC_KEY=$(runtime_value ANTHROPIC_API_KEY)
-    GW_OPENAI_KEY=$(runtime_value OPENAI_API_KEY)
-    GW_CUSTOM_URL=$(runtime_value PI_DOCKER_API_BASE_URL)
-    [[ -n "$GW_CUSTOM_URL" ]] || GW_CUSTOM_URL=$(runtime_value PI_DOCKER_BASE_URL)
-    GW_CUSTOM_KEY=$(runtime_value "${key_variable:-PI_DOCKER_API_KEY}")
-    GW_CUSTOM_API=$(runtime_value PI_DOCKER_API)
-    gateway_configure "$gateway_dir"
-    gateway_start "$gateway_dir"
-    NETWORK=$GATEWAY_NETWORK
-    # The gateway is unreachable for pi.dev anyway; skip those requests.
-    args+=(
-        --env "PI_DOCKER_GATEWAY_URL=${GATEWAY_URL}"
-        --env "PI_DOCKER_GATEWAY_PROVIDERS=${GATEWAY_PROVIDERS}"
-        --env PI_OFFLINE=1
-        --env PI_SKIP_VERSION_CHECK=1
-        --env PI_TELEMETRY=0
-    )
-    if [[ "$GATEWAY_CUSTOM" == true ]]; then
+if [[ "$EGRESS" != open ]]; then
+    egress_dir=$(mktemp -d "${TMPDIR:-/tmp}/pi-project-egress.XXXXXX")
+    custom_url=$(runtime_value PI_DOCKER_API_BASE_URL)
+    [[ -n "$custom_url" ]] || custom_url=$(runtime_value PI_DOCKER_BASE_URL)
+    egress_networks_create
+    if [[ "$EGRESS" == allowlist ]]; then
+        [[ -z "$(runtime_value ANTHROPIC_API_KEY)" ]] || egress_allow_host api.anthropic.com
+        [[ -z "$(runtime_value OPENAI_API_KEY)" ]] || egress_allow_host api.openai.com
+        if [[ -n "$custom_url" ]]; then
+            custom_host=$(url_host "$custom_url")
+            egress_allow_host "$custom_host"
+        fi
+        # read -a splits without glob expansion, so *.example.com stays literal.
+        IFS=$', \t' read -r -a extra_hosts <<<"${PI_DOCKER_EGRESS_ALLOW:-}"
+        for host in ${extra_hosts[@]+"${extra_hosts[@]}"}; do
+            egress_allow_host "$host"
+        done
+        allowlist_configure "$egress_dir"
+        allowlist_start "$egress_dir"
+        printf 'pi-project: egress allowed to %s\n' "${EGRESS_HOSTS[*]}" >&2
+        # No HTTP_PROXY: plain http:// requests have no route and fail closed.
         args+=(
-            --env "PI_DOCKER_API_BASE_URL=${GATEWAY_URL}/custom"
-            --env PI_DOCKER_API_KEY_VARIABLE=PI_DOCKER_API_KEY
-            --env "PI_DOCKER_API_KEY=${GATEWAY_DUMMY_KEY}"
+            --env "HTTPS_PROXY=${EGRESS_PROXY_URL}"
+            --env "https_proxy=${EGRESS_PROXY_URL}"
+            --env NODE_USE_ENV_PROXY=1
         )
+    else
+        GW_ANTHROPIC_KEY=$(runtime_value ANTHROPIC_API_KEY)
+        GW_OPENAI_KEY=$(runtime_value OPENAI_API_KEY)
+        GW_CUSTOM_URL=$custom_url
+        GW_CUSTOM_KEY=$(runtime_value "${key_variable:-PI_DOCKER_API_KEY}")
+        GW_CUSTOM_API=$(runtime_value PI_DOCKER_API)
+        gateway_configure "$egress_dir"
+        gateway_start "$egress_dir"
+        args+=(
+            --env "PI_DOCKER_GATEWAY_URL=${GATEWAY_URL}"
+            --env "PI_DOCKER_GATEWAY_PROVIDERS=${GATEWAY_PROVIDERS}"
+        )
+        if [[ "$GATEWAY_CUSTOM" == true ]]; then
+            args+=(
+                --env "PI_DOCKER_API_BASE_URL=${GATEWAY_URL}/custom"
+                --env PI_DOCKER_API_KEY_VARIABLE=PI_DOCKER_API_KEY
+                --env "PI_DOCKER_API_KEY=${GATEWAY_DUMMY_KEY}"
+            )
+        fi
     fi
+    # pi.dev is not reachable from either mode; skip those requests.
+    args+=(--env PI_OFFLINE=1 --env PI_SKIP_VERSION_CHECK=1 --env PI_TELEMETRY=0)
+    NETWORK=$EGRESS_NETWORK
 fi
 args+=(--network "$NETWORK")
 

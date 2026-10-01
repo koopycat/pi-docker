@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Checks PI_DOCKER_EGRESS=gateway through the real launcher. An echo server
-# stands in for a provider, so no credentials or internet access are needed.
-# pi-project --exec runs lib/egress-probe.mjs inside the agent container.
+# Checks PI_DOCKER_EGRESS=allowlist and PI_DOCKER_EGRESS=strict through the
+# real launcher: pi-project --exec runs lib/egress-probe.mjs inside the agent
+# container. A canary on the host network must stay unreachable in both modes.
+#
+# allowlist needs internet access: it opens real tunnels to api.openai.com,
+#   a Cloudflare-hosted name, which also exercises SNI-mismatch refusal.
+# strict needs none: an echo server stands in for the provider.
+#
+# Usage: ./verify-egress.sh [allowlist|strict]...   (default: both)
 
 SCRIPT_PATH=${BASH_SOURCE[0]}
 # Follow symlinks so a link on PATH still finds lib/ in the checkout.
@@ -15,6 +21,9 @@ done
 ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-pi-project-egress-check}
+MODES=("$@")
+[[ ${#MODES[@]} -gt 0 ]] || MODES=(allowlist strict)
+ALLOWED_HOST=api.openai.com
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
@@ -22,8 +31,6 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 }
 
 random_token() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
-secret="pd-secret-$(random_token)"
-anthropic_secret="pd-secret-$(random_token)"
 upstream="pi-docker-egress-upstream-$$"
 canary="pi-docker-egress-canary-$$"
 canary_port=$((20000 + RANDOM % 20000))
@@ -34,29 +41,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-gateway_resources() {
-    docker ps --all --quiet --filter label=pi-docker.gateway=1 | wc -l | tr -d ' '
-    docker network ls --quiet --filter label=pi-docker.gateway=1 | wc -l | tr -d ' '
+egress_resources() {
+    docker ps --all --quiet --filter label=pi-docker.egress=1 | wc -l | tr -d ' '
+    docker network ls --quiet --filter label=pi-docker.egress=1 | wc -l | tr -d ' '
 }
-before=$(gateway_resources)
+before=$(egress_resources)
 
-# The echo server replies with the path and auth headers it received.
-docker run --detach --rm \
-    --name "$upstream" \
-    --network bridge \
-    --user 65534:65534 \
-    --cap-drop=ALL \
-    --security-opt=no-new-privileges \
-    --entrypoint node \
-    "$IMAGE" \
-    -e 'require("node:http").createServer((req, res) => {
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({
-            path: req.url,
-            authorization: req.headers.authorization ?? null,
-            xApiKey: req.headers["x-api-key"] ?? null,
-        }));
-    }).listen(8080);' >/dev/null
 # The canary listens on every host address, including a bridge's host side.
 # Reaching it from the agent would mean the host is reachable.
 docker run --detach --rm \
@@ -70,63 +60,127 @@ docker run --detach --rm \
     -e 'require("node:http").createServer((req, res) => res.end("host reached"))
         .listen(Number(process.argv[1]), "0.0.0.0");' "$canary_port" >/dev/null
 
-upstream_ip=$(docker inspect --format '{{.NetworkSettings.Networks.bridge.IPAddress}}' "$upstream")
-[[ -n "$upstream_ip" ]] || {
-    printf 'FAIL: echo upstream has no bridge address\n' >&2
-    exit 1
-}
-
-output=$(
-    env -u PI_DOCKER_ENV_FILE -u PI_DOCKER_NETWORK -u PI_DOCKER_API_KEY_VARIABLE \
-        -u OPENAI_API_KEY -u PI_DOCKER_BASE_URL \
-        PI_DOCKER_IMAGE="$IMAGE" \
-        PI_DOCKER_VOLUME="$VOLUME" \
-        PI_DOCKER_EGRESS=gateway \
-        PI_DOCKER_PROVIDER=echo \
-        PI_DOCKER_MODEL=echo-model \
-        PI_DOCKER_API=openai-completions \
-        PI_DOCKER_API_BASE_URL="http://${upstream_ip}:8080/v1" \
-        PI_DOCKER_API_KEY="$secret" \
-        ANTHROPIC_API_KEY="$anthropic_secret" \
-        "${ROOT_DIR}/pi-project" --exec "$project" \
-        node --input-type=module -e "$(<"${ROOT_DIR}/lib/egress-probe.mjs")" "$upstream_ip" "$canary_port"
-)
-
 failures=0
 fail() {
     printf 'FAIL: %s\n' "$1" >&2
     failures=$((failures + 1))
 }
-section() { grep "^$1 " <<<"$output" || true; }
 
-grep '^CHECK ' <<<"$output"
-[[ "$(section CHECK | grep -c '^CHECK ')" -ge 11 ]] || fail "probe did not report every check"
-if grep -q '^CHECK FAIL' <<<"$output"; then
-    fail "network checks failed"
-fi
+# Run the probe through pi-project with the given environment assignments.
+probe() {
+    env -u PI_DOCKER_ENV_FILE -u PI_DOCKER_NETWORK -u PI_DOCKER_API_KEY_VARIABLE \
+        -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u PI_DOCKER_API_BASE_URL -u PI_DOCKER_BASE_URL \
+        -u PI_DOCKER_EGRESS_ALLOW \
+        PI_DOCKER_IMAGE="$IMAGE" \
+        PI_DOCKER_VOLUME="$VOLUME" \
+        "$@" \
+        "${ROOT_DIR}/pi-project" --exec "$project" \
+        node --input-type=module -e "$(<"${ROOT_DIR}/lib/egress-probe.mjs")" "${probe_args[@]}"
+}
 
-env_line=$(section ENV)
-models_line=$(section MODELS)
-echo_line=$(section ECHO)
-[[ -n "$env_line" && -n "$models_line" && -n "$echo_line" ]] || fail "probe output is incomplete"
-for value in "$secret" "$anthropic_secret"; do
-    [[ "$env_line" != *"$value"* ]] || fail "a real credential reached the agent environment"
-    [[ "$models_line" != *"$value"* ]] || fail "a real credential reached models.json"
+# Print the probe's checks and fail on any failed or missing one.
+expect_checks() {
+    local output=$1 minimum=$2
+    grep '^CHECK ' <<<"$output" || true
+    [[ "$(grep -c '^CHECK ' <<<"$output" || true)" -ge "$minimum" ]] || fail "probe did not report every check"
+    if grep -q '^CHECK FAIL' <<<"$output"; then
+        fail "egress checks failed"
+    fi
+}
+
+section() { grep "^$2 " <<<"$1" || true; }
+
+check_allowlist() {
+    printf '== allowlist (Pipelock CONNECT proxy, needs internet)\n'
+    local key output env_line
+    key="sk-dummy-$(random_token)"
+    probe_args=(allowlist "$canary_port" "$ALLOWED_HOST")
+    output=$(probe PI_DOCKER_EGRESS=allowlist OPENAI_API_KEY="$key")
+    expect_checks "$output" 19
+    env_line=$(section "$output" ENV)
+    # In this mode the agent holds the key by design.
+    [[ "$env_line" == *"\"OPENAI_API_KEY\":\"${key}\""* ]] || fail "allowlist mode did not forward the provider key"
+    [[ "$env_line" == *'"HTTPS_PROXY":"http://egress:8888"'* ]] || fail "HTTPS_PROXY is not set to the egress proxy"
+    [[ "$env_line" != *'"HTTP_PROXY"'* ]] || fail "HTTP_PROXY is set; plain http:// should have no route"
+}
+
+check_strict() {
+    printf '== strict (Caddy credential gateway, offline)\n'
+    local secret anthropic_secret port bridge_gateway output env_line models_line echo_line value
+    secret="pd-secret-$(random_token)"
+    anthropic_secret="pd-secret-$(random_token)"
+
+    # The echo server replies with the path and auth headers it received. The
+    # gateway reaches it through a published port on the default bridge's host
+    # address, because each run's gateway sits on its own outbound network.
+    docker run --detach --rm \
+        --name "$upstream" \
+        --publish 0:8080 \
+        --user 65534:65534 \
+        --cap-drop=ALL \
+        --security-opt=no-new-privileges \
+        --entrypoint node \
+        "$IMAGE" \
+        -e 'require("node:http").createServer((req, res) => {
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({
+                path: req.url,
+                authorization: req.headers.authorization ?? null,
+                xApiKey: req.headers["x-api-key"] ?? null,
+            }));
+        }).listen(8080);' >/dev/null
+    port=$(docker port "$upstream" 8080/tcp | head -n1 | sed 's/.*://')
+    bridge_gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+    [[ -n "$port" && -n "$bridge_gateway" ]] || {
+        fail "echo upstream has no published port or bridge gateway"
+        return
+    }
+
+    probe_args=(strict "$bridge_gateway" "$port" "$canary_port")
+    output=$(probe PI_DOCKER_EGRESS=strict \
+        PI_DOCKER_PROVIDER=echo \
+        PI_DOCKER_MODEL=echo-model \
+        PI_DOCKER_API=openai-completions \
+        PI_DOCKER_API_BASE_URL="http://${bridge_gateway}:${port}/v1" \
+        PI_DOCKER_API_KEY="$secret" \
+        ANTHROPIC_API_KEY="$anthropic_secret")
+    expect_checks "$output" 11
+
+    env_line=$(section "$output" ENV)
+    models_line=$(section "$output" MODELS)
+    echo_line=$(section "$output" ECHO)
+    [[ -n "$env_line" && -n "$models_line" && -n "$echo_line" ]] || fail "probe output is incomplete"
+    for value in "$secret" "$anthropic_secret"; do
+        [[ "$env_line" != *"$value"* ]] || fail "a real credential reached the agent environment"
+        [[ "$models_line" != *"$value"* ]] || fail "a real credential reached models.json"
+    done
+    [[ "$models_line" == *'"baseUrl":"http://llm-proxy:8080/anthropic"'* ]] ||
+        fail "models.json does not route anthropic through the gateway"
+    [[ "$models_line" == *'"baseUrl":"http://llm-proxy:8080/custom"'* ]] ||
+        fail "models.json does not route the custom provider through the gateway"
+    [[ "$echo_line" == *"\"authorization\":\"Bearer ${secret}\""* ]] ||
+        fail "the gateway did not replace the agent's Authorization header with the real key"
+    [[ "$echo_line" == *'"xApiKey":null'* ]] || fail "the gateway forwarded the agent's x-api-key header"
+    [[ "$echo_line" == *'"path":"/v1/echo?probe=1"'* ]] || fail "the gateway did not map /custom to the upstream path"
+    [[ "$echo_line" != *attacker-key* ]] || fail "the agent's own credential reached the upstream"
+    docker rm --force "$upstream" >/dev/null 2>&1 || true
+}
+
+for mode in "${MODES[@]}"; do
+    case "$mode" in
+        allowlist) check_allowlist ;;
+        strict) check_strict ;;
+        *)
+            printf 'Usage: %s [allowlist|strict]...\n' "$0" >&2
+            exit 2
+            ;;
+    esac
 done
-[[ "$models_line" == *'"baseUrl":"http://llm-proxy:8080/anthropic"'* ]] ||
-    fail "models.json does not route anthropic through the gateway"
-[[ "$models_line" == *'"baseUrl":"http://llm-proxy:8080/custom"'* ]] ||
-    fail "models.json does not route the custom provider through the gateway"
-[[ "$echo_line" == *"\"authorization\":\"Bearer ${secret}\""* ]] ||
-    fail "the gateway did not replace the agent's Authorization header with the real key"
-[[ "$echo_line" == *'"xApiKey":null'* ]] || fail "the gateway forwarded the agent's x-api-key header"
-[[ "$echo_line" == *'"path":"/v1/echo?probe=1"'* ]] || fail "the gateway did not map /custom to the upstream path"
-[[ "$echo_line" != *attacker-key* ]] || fail "the agent's own credential reached the upstream"
 
-[[ "$(gateway_resources)" == "$before" ]] || fail "the gateway container or network was left behind"
+[[ "$(egress_resources)" == "$before" ]] || fail "an egress container or network was left behind"
 
 if [[ "$failures" -gt 0 ]]; then
     printf '%s check(s) failed\n' "$failures" >&2
     exit 1
 fi
-printf 'PASS: credential gateway, no direct egress, no real credentials in the agent\n'
+printf 'PASS: %s\n' "${MODES[*]}"
