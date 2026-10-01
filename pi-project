@@ -11,6 +11,8 @@ done
 SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
+# shellcheck source=lib/docker.sh
+source "${SCRIPT_DIR}/lib/docker.sh"
 # shellcheck source=lib/egress.sh
 source "${SCRIPT_DIR}/lib/egress.sh"
 # shellcheck source=lib/host-files.sh
@@ -128,6 +130,8 @@ if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
             "$PI_DOCKER_ENV_FILE" "$env_mode" >&2
     fi
 fi
+
+require_docker pi-project
 
 filtered_env=""
 egress_dir=""

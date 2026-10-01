@@ -19,6 +19,7 @@ jobs:
         run: |
           shellcheck \
             bootstrap.sh \
+            lib/docker.sh \
             lib/egress.sh \
             lib/host-files.sh \
             lib/volumes.sh \

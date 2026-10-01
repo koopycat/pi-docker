@@ -21,11 +21,14 @@ while [[ -L "$SCRIPT_PATH" ]]; do
     SCRIPT_PATH=$link
 done
 ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
+# shellcheck source=lib/docker.sh
+source "${ROOT_DIR}/lib/docker.sh"
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-pi-project-egress-check}
 MODES=("$@")
 [[ ${#MODES[@]} -gt 0 ]] || MODES=(allowlist strict)
 
+require_docker verify-egress.sh
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
     exit 1
