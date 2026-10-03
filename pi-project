@@ -140,10 +140,12 @@ tty_used=false
 # Undo terminal modes the agent may leave behind when its own restore is lost
 # or unbalanced: the kitty keyboard protocol stack (otherwise the shell gets
 # keys as CSI-u sequences such as ";1:1A"), modifyOtherKeys, mouse and focus
-# reporting, color-scheme notifications, and a hidden cursor.
+# reporting, color-scheme notifications, a hidden cursor, and pi's fullscreen
+# alternate screen. 1047 rather than 1049 leaves that screen without restoring
+# a saved cursor, so it is a no-op after a clean exit.
 restore_terminal() {
     [[ "$tty_used" == true && -t 1 ]] || return 0
-    printf '\033[<99u\033[>4;0m\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1004l\033[?2031l\033[?25h'
+    printf '\033[?1047l\033[<99u\033[>4;0m\033[?1000l\033[?1002l\033[?1003l\033[?1006l\033[?1004l\033[?2031l\033[?25h'
 }
 cleanup() {
     restore_terminal

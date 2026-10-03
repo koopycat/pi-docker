@@ -26,5 +26,5 @@
 - Sidecar images are pinned by digest in `lib/egress.sh` and never automerged. Any change there must keep `./verify-egress.sh` passing.
 - Do not mount the host home directory, `~/.pi`, or `~/.ssh`.
 - `/home/pi` and `/home/pi/.pi` are mode 1777 because the runtime UID is the caller's, not the image's 1001; extensions write caches such as `~/.pi/cache` there.
-- pi's shrinkwrap makes npm install every `@esbuild/*` platform binary; `lib/prune-foreign-platforms.mjs` removes them and must run in the same `RUN` layer as `npm install`.
+- Since pi 1.0.1 the package ships no `npm-shrinkwrap.json`, so transitive dependencies resolve at build time. `lib/prune-foreign-platforms.mjs` stays as a guard against foreign `@esbuild/*` platform binaries and must run in the same `RUN` layer as `npm install`.
 - `publish-image.yml` calls `ci.yml` and publishes only after it passes; do not add a separate push trigger to `ci.yml`.

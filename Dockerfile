@@ -2,7 +2,7 @@
 FROM node:24-bookworm-slim
 
 ARG PI_PACKAGE=@earendil-works/pi-coding-agent
-ARG PI_VERSION=1.0.0
+ARG PI_VERSION=1.0.1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
