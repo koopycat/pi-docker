@@ -19,7 +19,7 @@
 # per-run bridge of its own, so it never shares a network with unrelated
 # containers. See docs/egress.md for the design and its decisions.
 
-EGRESS_PROXY_IMAGE=${PI_DOCKER_EGRESS_PROXY_IMAGE:-ghcr.io/luckypipewrench/pipelock:3.5.0@sha256:73e5d240f2ae02392c7de9c8858e9dee164396382c13e0ea95b4a497b2567965}
+EGRESS_PROXY_IMAGE=${PI_DOCKER_EGRESS_PROXY_IMAGE:-ghcr.io/luckypipewrench/pipelock:3.6.0@sha256:66d65eaca81ddae4d0872537bca276bd065baa8f2aebe2960de313cffc53fa47}
 EGRESS_PROXY_ALIAS=egress
 EGRESS_PROXY_PORT=8888
 EGRESS_PROXY_URL="http://${EGRESS_PROXY_ALIAS}:${EGRESS_PROXY_PORT}"
