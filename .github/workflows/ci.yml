@@ -19,18 +19,24 @@ jobs:
         run: |
           shellcheck \
             bootstrap.sh \
+            lib/docker.sh \
+            lib/egress.sh \
+            lib/host-files.sh \
             lib/volumes.sh \
             pi-docker-shell \
             pi-ext \
             pi-project \
             setup-identity.sh \
             test.sh \
+            verify-egress.sh \
+            verify-host-files.sh \
             verify-isolation-inner.sh \
             verify-isolation.sh
 
       - name: Validate Node scripts
         run: |
           node --check bootstrap-config.mjs
+          node --check lib/egress-probe.mjs
           node --check lib/prune-foreign-platforms.mjs
 
       - name: Build image
@@ -41,3 +47,11 @@ jobs:
 
       - name: Isolation check
         run: ./verify-isolation.sh .
+
+      - name: Host file protection check
+        run: ./verify-host-files.sh
+
+      - name: Egress checks (allowlist and strict)
+        run: |
+          docker version --format 'Docker Engine {{.Server.Version}}'
+          ./verify-egress.sh

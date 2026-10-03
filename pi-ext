@@ -11,6 +11,8 @@ done
 SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
+# shellcheck source=lib/docker.sh
+source "${SCRIPT_DIR}/lib/docker.sh"
 
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 SOURCE=${PI_EXTENSIONS_DIR:-${HOME}/.pi-extensions}
@@ -46,6 +48,8 @@ else
     }
     VOLUME=$(project_volume_name "$PROJECT_DIR")
 fi
+
+require_docker pi-ext
 
 if [[ "$COMMAND" == list ]]; then
     printf 'Volume: %s\n' "$VOLUME"

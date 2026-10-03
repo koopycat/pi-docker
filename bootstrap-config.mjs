@@ -92,6 +92,39 @@ if (provider && baseUrl && modelId) {
   providerConfigured = true;
 }
 
+// Built-in providers the credential gateway serves. The entries are rewritten
+// on every start, so an edit made from inside the sandbox does not persist.
+const gatewayUrl = env.PI_DOCKER_GATEWAY_URL?.trim();
+const gatewayProviders = new Set(
+  (env.PI_DOCKER_GATEWAY_PROVIDERS ?? "").split(",").map((name) => name.trim()).filter(Boolean),
+);
+const gatewayKey = "pi-docker-gateway";
+const gatewayRoutes = { anthropic: "/anthropic", openai: "/openai/v1" };
+for (const [name, route] of Object.entries(gatewayRoutes)) {
+  const entry = models.providers[name];
+  if (gatewayUrl && gatewayProviders.has(name)) {
+    models.providers[name] = { ...(entry ?? {}), baseUrl: `${gatewayUrl}${route}`, apiKey: gatewayKey };
+  } else if (entry?.apiKey === gatewayKey) {
+    // Drop the override an earlier gateway run left behind.
+    delete entry.baseUrl;
+    delete entry.apiKey;
+    if (Object.keys(entry).length === 0) delete models.providers[name];
+  }
+}
+
+if (gatewayUrl) {
+  try {
+    const auth = JSON.parse(await readFile(join(configDir, "auth.json"), "utf8"));
+    if (Object.keys(auth).length > 0) {
+      console.warn(
+        "pi-docker: auth.json in the agent volume holds /login credentials inside the sandbox; the gateway cannot keep those out. Run /logout for each provider to remove them.",
+      );
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
 await writeFile(modelsPath, `${JSON.stringify(models, null, 2)}\n`, { mode: 0o600 });
 await chmod(modelsPath, 0o600);
 

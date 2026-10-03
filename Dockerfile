@@ -13,7 +13,10 @@ RUN apt-get update \
         ripgrep \
     && rm -rf /var/lib/apt/lists/* \
     && nss_wrapper_so=$(dpkg-query -L libnss-wrapper | grep -E '/libnss_wrapper\.so$' | head -n1) \
-    && ln -sf "$nss_wrapper_so" /usr/local/lib/libnss_wrapper.so
+    && ln -sf "$nss_wrapper_so" /usr/local/lib/libnss_wrapper.so \
+    # Docker Desktop shows the bind-mount root as owned by root, which trips
+    # git's ownership check. /workspace is always the caller's own project.
+    && git config --system --add safe.directory /workspace
 
 # Separate layer so pi upgrades do not re-run apt and vice versa. Pruning must
 # happen in this same layer, or the foreign-platform binaries stay in the image.
@@ -28,7 +31,7 @@ RUN groupadd --gid 1001 pi \
     && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash pi \
     && mkdir -p /home/pi/.pi/agent \
     && chown -R pi:pi /home/pi/.pi \
-    && chmod 1777 /home/pi
+    && chmod 1777 /home/pi /home/pi/.pi
 
 # Root-owned so the runtime user cannot modify the entrypoint or helpers.
 COPY --chmod=0755 bootstrap.sh /usr/local/bin/pi-docker-entrypoint

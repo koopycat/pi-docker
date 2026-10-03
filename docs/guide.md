@@ -147,11 +147,14 @@ The per-project default avoids this collapse.
 Each normal `pi-project` run has exactly these intentional host mounts:
 
 ```text
-PROJECT_DIR (read-write)  -> /workspace
-named Docker volume       -> /home/pi/.pi/agent
+PROJECT_DIR (read-write)            -> /workspace
+PROJECT_DIR/.git/config (read-only) -> /workspace/.git/config
+PROJECT_DIR/.git/hooks (read-only)  -> /workspace/.git/hooks
+in-project core.hooksPath (read-only, if set, e.g. .husky)
+named Docker volume                 -> /home/pi/.pi/agent
 ```
 
-The project is the only host bind mount.
+The project is the only host directory mounted; the read-only entries are parts of it, described in [Files the host runs](#files-the-host-runs).
 The named volume is Docker-managed and contains pi's container-local settings, auth, trust state, resources, and sessions.
 The runner uses Docker's `volume-nocopy` mount option so image files under `/home/pi/.pi/agent` cannot seed or overwrite the volume.
 The runtime uses a caller-mapped non-root UID, drops all Linux capabilities, and enables `no-new-privileges`.
@@ -169,6 +172,29 @@ Those are Docker plumbing, not host home or project mounts.
 The project remains writable because it is bind-mounted and the container process uses the invoking user's UID and GID.
 The agent volume is prepared with the same UID and GID before pi starts.
 This relies on the container seeing the same numeric IDs as the host, which holds for a rootful Docker daemon; see Known limitations for rootless Docker and `userns-remap`.
+
+### Files the host runs
+
+pi can write anything in the project, including files that tools on the host later run on their own: git hooks, git config entries such as `core.fsmonitor` or `core.hooksPath`, `.envrc`, editor tasks, and package scripts.
+A planted file like that runs outside the container the next time you use git, enter the directory, or open the project in an editor, regardless of any egress control.
+
+`pi-project` limits this in two ways:
+
+- **Read-only git control files.** `.git/config`, `.git/hooks`, and a `core.hooksPath` directory inside the project (such as `.husky`) are mounted read-only. pi can still commit, branch, and stash, but cannot add hooks or change what git runs. Commands that write the repository config, such as `git config` or `git push -u`, fail inside the container. If `.git/hooks` does not exist, `pi-project` creates it on the host first, so it can be mounted.
+- **A change report.** Before pi starts, `pi-project` records hashes of files the host commonly runs; when pi exits, it lists every one that was added, modified, or removed:
+
+  ```text
+  pi-project: pi changed files that the host may run on its own.
+  Review them before running git, direnv, your editor, or build tools in this project:
+    added: .envrc
+    modified: package.json
+  ```
+
+  The list covers `.envrc`; `.vscode` tasks, settings, and launch files; `.devcontainer`; CI workflows; pre-commit and husky hooks; agent settings (`.claude`, `.mcp.json`, `.cursor`); `package.json` and package-manager config; `Makefile` and `justfile`; Nix and devenv files; `mise.toml`; `.gitattributes` and `.gitmodules`; and git internals that are not read-only (`.git/info`, `.git/commondir`, `.git/worktrees`, alternates, and submodule config and hooks).
+
+This is detection, not prevention, for everything except git config and hooks.
+Review reported files before running anything on the host.
+Linked worktrees and submodules whose `.git` is a file keep their git directory outside the project, so it is not mounted at all.
 
 ### Why not mount the host `.pi`
 
@@ -291,17 +317,28 @@ pi-ext sync
 pi-ext list
 ```
 
+Each top-level entry of the curated directory becomes one extension, and pi loads a directory through its `index.ts` or `index.js`.
+An extension that imports a sibling directory, such as `../shared`, needs a small wrapper entry that carries both:
+
+```bash
+mkdir -p ~/.pi-extensions/omniroute
+ln -s ~/src/pi_extensions/model-catalogs ~/.pi-extensions/omniroute/model-catalogs
+echo 'export { default } from "./model-catalogs/omniroute/index.ts";' > ~/.pi-extensions/omniroute/index.ts
+```
+
+`pi-ext sync` copies the symlinked tree as real files, so the relative imports keep working inside the volume.
+
 Set `PI_EXTENSIONS_DIR` to use another curated directory.
 Without a project directory, `pi-ext` uses the current directory's volume.
 Set `PI_DOCKER_VOLUME` to target an explicitly shared volume instead.
 After syncing, run `/reload` in pi to hot-reload extensions.
 Only sync extensions you trust, since they execute inside pi.
 
-## Network notes and egress reality
+## Network notes and egress control
 
 Pi needs network access to reach the configured model endpoint and may contact pi.dev for update checks, package checks, or install telemetry unless disabled.
-The default runner uses Docker's `bridge` network.
-Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over an allowed network.
+By default the runner uses Docker's `bridge` network, so pi can reach the whole internet.
+Filesystem isolation is not exfiltration protection: code the agent runs can read the API key that was intentionally forwarded into the container and can send it over the network.
 The project bind mount is also readable by that code.
 
 For offline work, disable networking explicitly:
@@ -310,18 +347,134 @@ For offline work, disable networking explicitly:
 PI_DOCKER_NETWORK=none pi-project . --offline
 ```
 
-For a restricted setup, use a Docker bridge network with egress filtering, or an HTTP proxy that permits only the model endpoint and required package/update hosts.
-Pass `HTTP_PROXY` and `HTTPS_PROXY` explicitly when a proxy is required:
+### Egress control
+
+`PI_DOCKER_EGRESS` restricts what pi can reach.
+[Egress control: architecture and decisions](egress.md) explains the design, the alternatives that were rejected, and the remaining risks.
+
+| Mode | pi holds the provider credential | pi can reach | `/login` subscriptions |
+|---|---|---|---|
+| `open` (default) | yes | the internet | yes |
+| `allowlist` | yes | only allowlisted hosts over HTTPS | yes, with `PI_DOCKER_EGRESS_LOGINS` |
+| `strict` | no, only a placeholder | only fixed provider routes on a credential gateway | no, API keys only |
+
+Both restricted modes put pi on a per-run Docker network created with `--internal` and isolated gateway mode, so it has no route off that network, no upstream DNS, and no address on the host side of the bridge.
+The only other member is a sidecar container, which is pi's only way out.
+The sidecar and both networks are removed when pi exits.
+Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`, and cannot be combined with `PI_DOCKER_NETWORK`.
+
+### allowlist mode
 
 ```bash
-PI_DOCKER_NETWORK=pi-egress-filtered \
-  HTTP_PROXY=http://proxy.internal:3128 \
-  HTTPS_PROXY=http://proxy.internal:3128 \
-  pi-project
+ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=allowlist pi-project
+PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai pi-project   # ChatGPT subscription via /login
 ```
 
-Configure the filtering network or proxy outside this repository.
-Do not assume that restricting the network protects credentials if the model endpoint itself is untrusted.
+The sidecar is [Pipelock](https://github.com/luckyPipewrench/pipelock), an HTTPS CONNECT proxy.
+pi gets `HTTPS_PROXY=http://egress:8888` and `NODE_USE_ENV_PROXY=1`.
+The proxy allows a tunnel only to an allowlisted host, and only when the TLS handshake inside names that same host.
+It refuses IP literals, private and metadata addresses, and plain `http://` requests.
+
+The allowlist is built from the configuration:
+
+- `ANTHROPIC_API_KEY` allows `api.anthropic.com`;
+- `OPENAI_API_KEY` allows `api.openai.com`;
+- `PI_DOCKER_API_BASE_URL` allows that URL's host;
+- `PI_DOCKER_EGRESS_LOGINS` adds the hosts of providers you signed in to with `/login`, see below;
+- `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`;
+- `PI_DOCKER_EGRESS_ALLOW_PRIVATE` adds exact hosts that resolve to a private address, see below.
+
+`pi-project` prints the final list on startup.
+
+A `/login` subscription keeps its OAuth tokens in `auth.json` inside the agent volume, so pi holds them in every mode.
+Name the providers you use in `PI_DOCKER_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts.
+The names are pi's provider IDs, the same keys `/login` writes to `auth.json`:
+
+| `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
+|---|---|
+| `openai` (ChatGPT subscription, "Sign in with ChatGPT") | `api.openai.com`, `auth.openai.com` |
+| `openai-codex` (pi's legacy ChatGPT Plus/Pro login) | `chatgpt.com`, `auth.openai.com` |
+| `anthropic` (Claude subscription) | `api.anthropic.com`, `platform.claude.com` |
+| `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
+
+These lists come from pi 0.99.1's provider code.
+`pi-project` never reads them from `auth.json`, because pi can edit that file and would otherwise choose its own allowlist.
+`github-copilot` also allows `api.github.com`, which exposes GitHub's whole API to the token pi holds.
+`/login` works inside the container: the browser cannot reach pi's callback there, so paste the redirect URL when pi asks for it, or choose the device-code option. It needs the same hosts, and the tokens then persist in the project's volume.
+Package registries and GitHub are not allowed by default, because they accept uploads with any token; install dependencies before the session, in `open` mode.
+
+The proxy refuses private, loopback, and link-local destinations after resolving a name, even for an allowlisted host.
+A model router or gateway on your local network, for example `router.lan` at `10.1.0.11`, therefore needs `PI_DOCKER_EGRESS_ALLOW_PRIVATE=router.lan`.
+It takes exact names only, no wildcards: whoever controls a name's DNS decides where it points, so list only names whose DNS you control.
+Cloud metadata and link-local addresses stay blocked regardless.
+
+### strict mode
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=strict pi-project
+```
+
+The sidecar is a [Caddy](https://caddyserver.com/) reverse proxy that holds the real keys.
+The bootstrap points pi's providers at `http://llm-proxy:8080` with the placeholder key `pi-docker-gateway`.
+The gateway serves only fixed routes and answers everything else with `403`:
+
+| Route | Upstream | Credential | Header the gateway sets |
+|---|---|---|---|
+| `/anthropic/*` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `x-api-key` |
+| `/openai/*` | `https://api.openai.com` | `OPENAI_API_KEY` | `Authorization: Bearer` |
+| `/custom/*` | `PI_DOCKER_API_BASE_URL` | `PI_DOCKER_API_KEY` or `PI_DOCKER_API_KEY_VARIABLE` | `x-api-key` for `anthropic-messages`, otherwise `Authorization: Bearer` |
+
+The gateway always overwrites these headers and removes the other one, so pi cannot use an allowed provider with a credential of its own, for example to upload data to a provider's file API under an attacker's account.
+Requests and responses are otherwise passed through unchanged and streamed without buffering.
+Credentials can come from the host environment or from `PI_DOCKER_ENV_FILE`; the gateway reads them from a temporary env-file that is deleted after the run.
+
+Limitations of strict mode:
+
+- Only the three routes above are supported. Other provider keys, `PI_DOCKER_HEADERS_JSON`, and proxy variables are not passed, and `pi-project` names them in a warning.
+- Credentials stored with `/login` live in `auth.json` inside the agent volume, where the gateway cannot protect them. The bootstrap warns when `auth.json` is not empty; run `/logout` to remove them.
+
+### Extension providers
+
+Some providers come from a pi extension rather than from pi itself, for example a catalog extension for a model router such as OmniRoute.
+Such an extension reads its endpoint and key from variables of its own, such as `OMNIROUTE_BASE_URL` and `OMNIROUTE_API_KEY`.
+Name them, and let `pi-project` fill them in for each mode:
+
+```bash
+# ~/.config/pi-docker/omniroute.env (chmod 600)
+PI_DOCKER_API_BASE_URL=https://omniroute.example.lan/v1
+PI_DOCKER_BASE_URL_VARIABLE=OMNIROUTE_BASE_URL
+PI_DOCKER_API_KEY_VARIABLE=OMNIROUTE_API_KEY
+OMNIROUTE_API_KEY=replace-me
+```
+
+| Mode | `OMNIROUTE_BASE_URL` inside pi | `OMNIROUTE_API_KEY` inside pi |
+|---|---|---|
+| `open` | the real URL | the real key |
+| `allowlist` | the real URL; its host is allowlisted automatically | the real key |
+| `strict` | `http://llm-proxy:8080/custom`, the gateway's custom route | the placeholder `pi-docker-gateway`; the gateway sends the real key upstream |
+
+Without `PI_DOCKER_PROVIDER` and `PI_DOCKER_MODEL`, the bootstrap registers no provider of its own, so only the extension's provider appears.
+Install the extension into the project's volume with `pi-ext` (see [Curated host extensions](#curated-host-extensions)).
+If the router resolves to a private address, add `PI_DOCKER_EGRESS_ALLOW_PRIVATE` with its host for `allowlist` mode.
+
+### What egress control does not cover
+
+- pi can still send anything it reads, including project files, to the hosts it may reach.
+- pi can write files in the project that the host later runs, such as git hooks, `.git/config`, editor tasks, and package scripts. Review changes before running git commands or opening the project in an IDE. See [residual risks](egress.md#residual-risks).
+- WSL2 has not been tested yet.
+
+### Verify egress control
+
+```bash
+./verify-egress.sh            # both modes
+./verify-egress.sh strict     # offline
+./verify-egress.sh allowlist  # needs internet
+```
+
+The check runs a probe inside pi's container through the real launcher, with a listener on the host network as a canary.
+It fails if pi can resolve external names, connect directly to the internet, the metadata address, or the host, or reach anything the sidecar should refuse.
+In strict mode it also checks that no real key reaches pi and that the gateway replaces pi's credentials.
+[Verification](egress.md#verification) lists every check.
 
 ## Sources
 

@@ -12,6 +12,8 @@ set -Eeuo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib/volumes.sh
 source "${SCRIPT_DIR}/lib/volumes.sh"
+# shellcheck source=lib/docker.sh
+source "${SCRIPT_DIR}/lib/docker.sh"
 
 IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
 VOLUME=${PI_DOCKER_VOLUME:-pi-project-test}
@@ -21,6 +23,7 @@ VOLUME=${PI_DOCKER_VOLUME:-pi-project-test}
     exit 1
 }
 
+require_docker test.sh
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
     printf 'Image %s is missing. Run docker build -t %s . first.\n' "$IMAGE" "$IMAGE" >&2
     exit 1

@@ -14,9 +14,23 @@
       ],
       "depNameTemplate": "@earendil-works/pi-coding-agent",
       "datasourceTemplate": "npm"
+    },
+    {
+      "description": "Egress sidecar images in lib/egress.sh, pinned by digest",
+      "customType": "regex",
+      "managerFilePatterns": ["/^lib/egress\\.sh$/"],
+      "matchStrings": [
+        "PI_DOCKER_(?:EGRESS_PROXY|GATEWAY)_IMAGE:-(?<depName>[a-z0-9./-]+):(?<currentValue>[^@}\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\\}"
+      ],
+      "datasourceTemplate": "docker"
     }
   ],
   "packageRules": [
+    {
+      "description": "The egress sidecars are the network boundary; review every update",
+      "matchFileNames": ["lib/egress.sh"],
+      "automerge": false
+    },
     {
       "description": "Wait out quick follow-up fixes; ci.yml gates every bump",
       "matchDepNames": ["@earendil-works/pi-coding-agent"],
