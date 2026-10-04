@@ -194,6 +194,16 @@ args=(
     --env "RAPUNZEL_STATE_DIR=${H_STATE_DIR}"
     --env "${H_STATE_ENV}=${H_STATE_DIR}"
 )
+# Show the host's local time instead of UTC. TZ is not secret, so it is set in
+# every egress mode; the name is checked so it cannot carry anything else.
+host_tz=${TZ:-}
+if [[ -z "$host_tz" && -L /etc/localtime ]]; then
+    host_tz=$(readlink /etc/localtime)
+    host_tz=${host_tz#*/zoneinfo/}
+fi
+if [[ "$host_tz" =~ ^:?[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$ ]]; then
+    args+=(--env "TZ=${host_tz#:}")
+fi
 # Git config and hooks stay read-only, so the harness can commit but cannot plant
 # anything the host's git would run.
 host_files_mounts "$PROJECT_DIR"
