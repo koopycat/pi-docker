@@ -1,13 +1,13 @@
 # rapunzel: Docker sandbox for coding-agent harnesses
 
-pi is the default harness and Claude Code is the second; Codex CLI and Copilot CLI are planned as profiles on the same launcher.
+pi is the default harness; Claude Code and Codex CLI are further profiles, and Copilot CLI is planned.
 
 ## Commands
 
 - `docker build -t rapunzel .`
 - `./rapunzel [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
 - `./rapunzel --shell [PROJECT_DIR]`
-- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
+- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
 - `./rapunzel-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`

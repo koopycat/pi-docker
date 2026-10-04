@@ -2,7 +2,7 @@
 
 rapunzel runs coding-agent harnesses against a project inside a hardened Docker sandbox. The agent sees one host directory, the project mounted at `/workspace`, and keeps its settings, logins, sessions, and extensions in a separate Docker volume per project. It runs without root, receives only an allowlist of environment variables, and can be limited to named hosts or kept away from your provider keys entirely.
 
-The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. Claude Code is the second (`--harness claude`, image `rapunzel:claude`, built with `docker build --target claude -t rapunzel:claude .`); it supports `open` and `allowlist` egress, not `strict` yet. Codex CLI and Copilot CLI are planned as further profiles on the same launcher.
+The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`); both support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
 
 The name: Rapunzel is kept in a tower whose only way out is a single strand you control. Here the tower is the container, and the strand is the one project directory and, optionally, the one egress proxy.
 
@@ -65,6 +65,23 @@ RAPUNZEL_ENV_FILE=~/.config/rapunzel/claude.env ./rapunzel --harness claude .
 The token enters the container as an environment variable and is never written to the volume, and no refresh token from your host login is copied, so host and sandbox sessions do not invalidate each other. Revoke it from your Claude account settings when you no longer need it. With a token or `ANTHROPIC_API_KEY` set, the entrypoint marks first-run onboarding as done so Claude Code skips the login picker.
 
 `RAPUNZEL_EGRESS=allowlist` works with either credential (`api.anthropic.com` is always allowed for this harness); `strict` is not supported for Claude Code yet.
+
+## Codex CLI
+
+```bash
+docker build --target codex -t rapunzel:codex .
+./rapunzel --harness codex [PROJECT_DIR [codex arguments...]]
+```
+
+Use `OPENAI_API_KEY` (or `CODEX_API_KEY`), or sign in with your ChatGPT subscription once per project volume through the device-code flow:
+
+```bash
+./rapunzel --harness codex --exec . codex login --device-auth
+```
+
+Codex prints a link and a one-time code; finish the sign-in in your host browser. The login is stored in the project's volume (`auth.json` in `CODEX_HOME`), not copied from the host's `~/.codex`, so host and sandbox sessions stay independent. With `RAPUNZEL_EGRESS=allowlist`, a subscription login needs `RAPUNZEL_EGRESS_LOGINS=openai-codex` (`chatgpt.com`, `auth.openai.com`); `strict` is not supported for Codex yet.
+
+Codex's own sandbox (bubblewrap) cannot create namespaces inside rapunzel's container, so the entrypoint defaults `sandbox_mode` to `danger-full-access` in `config.toml`; the container is the boundary, and Codex still asks for approval. It also stores logins in a file and turns off update checks and analytics. Values you set yourself in `config.toml` win.
 
 ## What stays separate
 

@@ -66,6 +66,36 @@ USER agent
 CMD ["claude"]
 
 # ---------------------------------------------------------------------------
+# codex: profiles/codex/profile.sh
+# ---------------------------------------------------------------------------
+FROM base AS codex
+
+ARG CODEX_PACKAGE=@openai/codex
+ARG CODEX_VERSION=0.160.0
+
+# The interactive CLI manages a background app-server with ps.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# bin/codex.js resolves the platform's native binary from an optional
+# dependency at run time, so no install script is needed.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --ignore-scripts "${CODEX_PACKAGE}@${CODEX_VERSION}" \
+    && codex --version
+
+RUN mkdir -p /home/agent/.codex \
+    && chown agent:agent /home/agent/.codex
+
+COPY --chmod=0755 profiles/codex/bootstrap.mjs /usr/local/lib/rapunzel/bootstrap-harness.mjs
+
+ENV RAPUNZEL_STATE_DIR=/home/agent/.codex \
+    CODEX_HOME=/home/agent/.codex
+
+USER agent
+CMD ["codex"]
+
+# ---------------------------------------------------------------------------
 # pi: profiles/pi/profile.sh
 # ---------------------------------------------------------------------------
 FROM base AS pi
