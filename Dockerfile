@@ -27,22 +27,22 @@ RUN --mount=type=bind,source=lib/prune-foreign-platforms.mjs,target=/tmp/prune-f
 
 # The runtime UID is the caller's, not 1001, so HOME must be writable by any
 # UID (git config, npm and tool caches). Sticky like /tmp.
-RUN groupadd --gid 1001 pi \
-    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash pi \
-    && mkdir -p /home/pi/.pi/agent \
-    && chown -R pi:pi /home/pi/.pi \
-    && chmod 1777 /home/pi /home/pi/.pi
+RUN groupadd --gid 1001 agent \
+    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash agent \
+    && mkdir -p /home/agent/.pi/agent \
+    && chown -R agent:agent /home/agent/.pi \
+    && chmod 1777 /home/agent /home/agent/.pi
 
 # Root-owned so the runtime user cannot modify the entrypoint or helpers.
-COPY --chmod=0755 bootstrap.sh /usr/local/bin/pi-docker-entrypoint
-COPY --chmod=0755 pi-docker-shell /usr/local/bin/pi-docker-shell
+COPY --chmod=0755 bootstrap.sh /usr/local/bin/rapunzel-entrypoint
+COPY --chmod=0755 rapunzel-shell /usr/local/bin/rapunzel-shell
 # --chmod also applies to the directory COPY creates, so it must stay traversable.
-COPY --chmod=0755 bootstrap-config.mjs setup-identity.sh verify-isolation-inner.sh /usr/local/lib/pi-docker/
+COPY --chmod=0755 bootstrap-config.mjs setup-identity.sh verify-isolation-inner.sh /usr/local/lib/rapunzel/
 
-ENV HOME=/home/pi \
-    PI_CODING_AGENT_DIR=/home/pi/.pi/agent
+ENV HOME=/home/agent \
+    PI_CODING_AGENT_DIR=/home/agent/.pi/agent
 
 WORKDIR /workspace
-USER pi
-ENTRYPOINT ["/usr/local/bin/pi-docker-entrypoint"]
+USER agent
+ENTRYPOINT ["/usr/local/bin/rapunzel-entrypoint"]
 CMD ["pi"]

@@ -13,8 +13,8 @@ ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 source "${ROOT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${ROOT_DIR}/lib/docker.sh"
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-pi-project-verify}
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+VOLUME=${RAPUNZEL_VOLUME:-rapunzel-verify}
 PROJECT_DIR=${1:-$ROOT_DIR}
 
 [[ "$(id -u)" != 0 ]] || {
@@ -39,7 +39,7 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 # so its ownership must be prepared for the invoking UID/GID on every platform.
 prepare_volume_owner
 
-# Use the same two mounts as pi-project, with no host HOME or environment file.
+# Use the same two mounts as rapunzel, with no host HOME or environment file.
 # volume-nocopy prevents Docker from copying image seed files into the named volume.
 docker run --rm \
     --user "$(id -u):$(id -g)" \
@@ -48,9 +48,9 @@ docker run --rm \
     --cap-drop=ALL \
     --security-opt=no-new-privileges \
     --mount "type=bind,src=${PROJECT_DIR},dst=/workspace" \
-    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
-    --env HOME=/home/pi \
-    --env PI_CODING_AGENT_DIR=/home/pi/.pi/agent \
+    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
+    --env HOME=/home/agent \
+    --env PI_CODING_AGENT_DIR=/home/agent/.pi/agent \
     --env HOST_HOME_PATH="$HOST_HOME" \
     "$IMAGE" \
-    /usr/local/lib/pi-docker/verify-isolation-inner.sh
+    /usr/local/lib/rapunzel/verify-isolation-inner.sh

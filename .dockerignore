@@ -3,4 +3,4 @@
 .env.*
 !.env.example
 .DS_Store
-.pi-ext.*
+.rapunzel-ext.*

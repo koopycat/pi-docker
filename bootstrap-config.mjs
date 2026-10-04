@@ -10,14 +10,14 @@ for (const name of ["sessions", "extensions", "skills", "prompts", "themes"]) {
 }
 
 const env = process.env;
-const provider = env.PI_DOCKER_PROVIDER?.trim();
-const modelId = (env.PI_DOCKER_MODEL || env.PI_DOCKER_MODEL_ID)?.trim();
+const provider = env.RAPUNZEL_PROVIDER?.trim();
+const modelId = (env.RAPUNZEL_MODEL || env.RAPUNZEL_MODEL_ID)?.trim();
 const baseUrl = (
-  env.PI_DOCKER_API_BASE_URL ||
-  env.PI_DOCKER_BASE_URL
+  env.RAPUNZEL_API_BASE_URL ||
+  env.RAPUNZEL_BASE_URL
 )?.trim();
-const api = (env.PI_DOCKER_API || "openai-completions").trim();
-const apiKeyVariable = (env.PI_DOCKER_API_KEY_VARIABLE || "PI_DOCKER_API_KEY").trim();
+const api = (env.RAPUNZEL_API || "openai-completions").trim();
+const apiKeyVariable = (env.RAPUNZEL_API_KEY_VARIABLE || "RAPUNZEL_API_KEY").trim();
 
 function numericEnv(name, fallback) {
   const raw = env[name]?.trim();
@@ -51,11 +51,11 @@ let providerConfigured = false;
 if (provider && baseUrl && modelId) {
   const model = {
     id: modelId,
-    name: env.PI_DOCKER_MODEL_NAME?.trim() || modelId,
-    reasoning: env.PI_DOCKER_REASONING === "1" || env.PI_DOCKER_REASONING === "true",
+    name: env.RAPUNZEL_MODEL_NAME?.trim() || modelId,
+    reasoning: env.RAPUNZEL_REASONING === "1" || env.RAPUNZEL_REASONING === "true",
     input: ["text"],
-    contextWindow: numericEnv("PI_DOCKER_CONTEXT_WINDOW", 128000),
-    maxTokens: numericEnv("PI_DOCKER_MAX_TOKENS", 16384),
+    contextWindow: numericEnv("RAPUNZEL_CONTEXT_WINDOW", 128000),
+    maxTokens: numericEnv("RAPUNZEL_MAX_TOKENS", 16384),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   };
 
@@ -66,22 +66,22 @@ if (provider && baseUrl && modelId) {
     models: [model],
   };
 
-  if (env.PI_DOCKER_COMPAT_JSON) {
-    providerConfig.compat = jsonEnv("PI_DOCKER_COMPAT_JSON");
+  if (env.RAPUNZEL_COMPAT_JSON) {
+    providerConfig.compat = jsonEnv("RAPUNZEL_COMPAT_JSON");
   }
-  if (env.PI_DOCKER_HEADERS_JSON) {
-    providerConfig.headers = jsonEnv("PI_DOCKER_HEADERS_JSON");
+  if (env.RAPUNZEL_HEADERS_JSON) {
+    providerConfig.headers = jsonEnv("RAPUNZEL_HEADERS_JSON");
     const sensitive = /(authorization|token|secret|api[-_]?key|password|bearer)/i;
     const risky = Object.entries(providerConfig.headers).some(
       ([key, value]) => sensitive.test(key) || (typeof value === "string" && /^bearer\s/i.test(value)),
     );
     if (risky) {
       console.warn(
-        "pi-docker: PI_DOCKER_HEADERS_JSON appears to contain a credential; it is stored in plaintext at models.json (mode 0600) inside the agent volume.",
+        "rapunzel: RAPUNZEL_HEADERS_JSON appears to contain a credential; it is stored in plaintext at models.json (mode 0600) inside the agent volume.",
       );
     }
   }
-  if (env.PI_DOCKER_AUTH_HEADER === "1" || env.PI_DOCKER_AUTH_HEADER === "true") {
+  if (env.RAPUNZEL_AUTH_HEADER === "1" || env.RAPUNZEL_AUTH_HEADER === "true") {
     providerConfig.authHeader = true;
   }
 
@@ -94,11 +94,11 @@ if (provider && baseUrl && modelId) {
 
 // Built-in providers the credential gateway serves. The entries are rewritten
 // on every start, so an edit made from inside the sandbox does not persist.
-const gatewayUrl = env.PI_DOCKER_GATEWAY_URL?.trim();
+const gatewayUrl = env.RAPUNZEL_GATEWAY_URL?.trim();
 const gatewayProviders = new Set(
-  (env.PI_DOCKER_GATEWAY_PROVIDERS ?? "").split(",").map((name) => name.trim()).filter(Boolean),
+  (env.RAPUNZEL_GATEWAY_PROVIDERS ?? "").split(",").map((name) => name.trim()).filter(Boolean),
 );
-const gatewayKey = "pi-docker-gateway";
+const gatewayKey = "rapunzel-gateway";
 const gatewayRoutes = { anthropic: "/anthropic", openai: "/openai/v1" };
 for (const [name, route] of Object.entries(gatewayRoutes)) {
   const entry = models.providers[name];
@@ -117,7 +117,7 @@ if (gatewayUrl) {
     const auth = JSON.parse(await readFile(join(configDir, "auth.json"), "utf8"));
     if (Object.keys(auth).length > 0) {
       console.warn(
-        "pi-docker: auth.json in the agent volume holds /login credentials inside the sandbox; the gateway cannot keep those out. Run /logout for each provider to remove them.",
+        "rapunzel: auth.json in the agent volume holds /login credentials inside the sandbox; the gateway cannot keep those out. Run /logout for each provider to remove them.",
       );
     }
   } catch (error) {

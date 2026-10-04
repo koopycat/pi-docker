@@ -22,7 +22,7 @@ project_volume_name() {
     : "${1:?project_volume_name requires a project path}"
     local hash
     hash=$(project_hash "$1") || return 1
-    printf 'pi-project-agent-%s' "$hash"
+    printf 'rapunzel-agent-%s' "$hash"
 }
 
 # Make the agent volume writable by the invoking host UID/GID.
@@ -60,12 +60,12 @@ prepare_volume_owner() {
         --cap-add=DAC_OVERRIDE \
         --security-opt=no-new-privileges \
         --entrypoint /bin/bash \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
         "$IMAGE" \
         -euo pipefail -c '
-            marker=/home/pi/.pi/agent/.owner-initialized
+            marker=/home/agent/.pi/agent/.owner-initialized
             [[ -f "$marker" && ! -L "$marker" && "$(<"$marker")" == "$1:$2" ]] && exit 0
-            chown -R "$1:$2" /home/pi/.pi/agent
+            chown -R "$1:$2" /home/agent/.pi/agent
             rm -f "$marker"
             printf "%s:%s\n" "$1" "$2" >"$marker"
             chown "$1:$2" "$marker"

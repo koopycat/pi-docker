@@ -20,7 +20,7 @@
       "customType": "regex",
       "managerFilePatterns": ["/^lib/egress\\.sh$/"],
       "matchStrings": [
-        "PI_DOCKER_(?:EGRESS_PROXY|GATEWAY)_IMAGE:-(?<depName>[a-z0-9./-]+):(?<currentValue>[^@}\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\\}"
+        "RAPUNZEL_(?:EGRESS_PROXY|GATEWAY)_IMAGE:-(?<depName>[a-z0-9./-]+):(?<currentValue>[^@}\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\\}"
       ],
       "datasourceTemplate": "docker"
     }

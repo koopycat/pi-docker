@@ -120,7 +120,7 @@ host_files_report() {
     ' "$before" "$after" | sort -u)
     [[ -n "$changes" ]] || return 0
     printf '%s\n' \
-        'pi-project: pi changed files that the host may run on its own.' \
+        'rapunzel: pi changed files that the host may run on its own.' \
         'Review them before running git, direnv, your editor, or build tools in this project:' \
         "$changes" >&2
 }

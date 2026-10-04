@@ -1,54 +1,58 @@
-# Detailed Guide
+# rapunzel: Detailed Guide
+
+rapunzel runs coding-agent harnesses in a hardened Docker sandbox.
+The pi coding agent is the first supported harness and the only one so far; Claude Code, Codex CLI, and Copilot CLI are planned as further profiles.
+This guide therefore describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
 
 This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md); for how and why it works, see the [architecture](architecture.md).
 
-The design follows pi's official [Plain Docker](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/containerization.md) pattern, while adding a non-root runtime user, an isolated named volume, runtime provider configuration, and an isolation check.
+The pi profile follows pi's official [Plain Docker](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/containerization.md) pattern, while adding a non-root runtime user, an isolated named volume, runtime provider configuration, and an isolation check.
 
 ## Quick start
 
 Build the image with the pinned pi version (currently `1.0.1`):
 
 ```bash
-docker build --pull -t pi-project-sandbox .
+docker build --pull -t rapunzel .
 ```
 
 To choose a different published version explicitly:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=1.0.1 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=1.0.1 -t rapunzel .
 ```
 
 Put this checkout on your `PATH`, for example in `~/.zshrc` or `~/.bashrc`:
 
 ```bash
-export PATH="$HOME/src/pi-docker:$PATH"
+export PATH="$HOME/src/rapunzel:$PATH"
 ```
 
-Symlinking `pi-project` and `pi-ext` into a directory already on `PATH` works too; the scripts follow the link back to this checkout.
+Symlinking `rapunzel` and `rapunzel-ext` into a directory already on `PATH` works too; the scripts follow the link back to this checkout.
 
 Run pi against the project you are in:
 
 ```bash
 cd ~/src/my-project
-pi-project
+rapunzel
 ```
 
-Without a directory argument, `pi-project` uses the current directory.
-Any other directory works the same way, such as `pi-project ~/src/other-project`.
-Pass normal pi arguments after an explicit project directory; the first argument is always read as the directory, so write `pi-project . --continue`, not `pi-project --continue`:
+Without a directory argument, `rapunzel` uses the current directory.
+Any other directory works the same way, such as `rapunzel ~/src/other-project`.
+Pass normal pi arguments after an explicit project directory; the first argument is always read as the directory, so write `rapunzel . --continue`, not `rapunzel --continue`:
 
 ```bash
-pi-project . --model openai/gpt-5.6-luna
-pi-project . --continue
+rapunzel . --model openai/gpt-5.6-luna
+rapunzel . --continue
 ```
 
-The default image name is `pi-project-sandbox`.
-Each project gets its own default agent volume derived from its canonical path, such as `pi-project-agent-<hash>`.
+The default image name is `rapunzel`.
+Each project gets its own default agent volume derived from its canonical path, such as `rapunzel-agent-<hash>`.
 This keeps trust decisions, sessions, auth, and extensions separate between projects.
-Set `PI_DOCKER_VOLUME` only when deliberately opting into a shared volume:
+Set `RAPUNZEL_VOLUME` only when deliberately opting into a shared volume:
 
 ```bash
-PI_DOCKER_IMAGE=my-pi PI_DOCKER_VOLUME=my-pi-agent pi-project
+RAPUNZEL_IMAGE=my-rapunzel RAPUNZEL_VOLUME=my-rapunzel-agent rapunzel
 ```
 
 The wrapper refuses to run pi as root because the project bind mount must be writable by the caller's non-root UID.
@@ -63,51 +67,51 @@ They are supplied at runtime through a Docker env-file or explicit environment v
 For a custom OpenAI-compatible provider, copy `.env.example` to a protected file outside the repository and build context, then set the endpoint, model, and key:
 
 ```bash
-ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pi-docker"
+ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rapunzel"
 mkdir -p "$ENV_DIR"
 cp .env.example "$ENV_DIR/provider.env"
 # Edit provider.env with the real endpoint and secret.
 chmod 600 "$ENV_DIR/provider.env"
-PI_DOCKER_ENV_FILE="$ENV_DIR/provider.env" pi-project
+RAPUNZEL_ENV_FILE="$ENV_DIR/provider.env" rapunzel
 ```
 
-`pi-project` warns if the env file is not mode `600`, but does not change its permissions automatically.
+`rapunzel` warns if the env file is not mode `600`, but does not change its permissions automatically.
 The bootstrap writes or updates the custom provider in the container-local `models.json` on each startup.
 Its configuration is assembled from:
 
-- `PI_DOCKER_PROVIDER` - provider ID such as `my-provider`.
-- `PI_DOCKER_API_BASE_URL` - provider endpoint.
-- `PI_DOCKER_API` - supported pi API type, normally `openai-completions`, `openai-responses`, or `anthropic-messages`.
-- `PI_DOCKER_MODEL` or `PI_DOCKER_MODEL_ID` - model ID such as `cx/gpt-5.6-luna`.
-- `PI_DOCKER_API_KEY_VARIABLE` - name of the environment variable referenced by `models.json`, defaulting to `PI_DOCKER_API_KEY`.
-- `PI_DOCKER_API_KEY` or the selected variable - secret passed into the container.
-- Optional `PI_DOCKER_COMPAT_JSON`, `PI_DOCKER_HEADERS_JSON`, `PI_DOCKER_AUTH_HEADER`, `PI_DOCKER_REASONING`, `PI_DOCKER_CONTEXT_WINDOW`, and `PI_DOCKER_MAX_TOKENS`.
+- `RAPUNZEL_PROVIDER` - provider ID such as `my-provider`.
+- `RAPUNZEL_API_BASE_URL` - provider endpoint.
+- `RAPUNZEL_API` - supported pi API type, normally `openai-completions`, `openai-responses`, or `anthropic-messages`.
+- `RAPUNZEL_MODEL` or `RAPUNZEL_MODEL_ID` - model ID such as `cx/gpt-5.6-luna`.
+- `RAPUNZEL_API_KEY_VARIABLE` - name of the environment variable referenced by `models.json`, defaulting to `RAPUNZEL_API_KEY`.
+- `RAPUNZEL_API_KEY` or the selected variable - secret passed into the container.
+- Optional `RAPUNZEL_COMPAT_JSON`, `RAPUNZEL_HEADERS_JSON`, `RAPUNZEL_AUTH_HEADER`, `RAPUNZEL_REASONING`, `RAPUNZEL_CONTEXT_WINDOW`, and `RAPUNZEL_MAX_TOKENS`.
 
 For built-in providers, pass the provider key and select the provider/model with pi's normal arguments.
 The wrapper explicitly forwards supported provider variables such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and the other variables documented by pi.
 For example:
 
 ```bash
-OPENAI_API_KEY="$OPENAI_API_KEY" pi-project . --provider openai --model gpt-5.6-luna
+OPENAI_API_KEY="$OPENAI_API_KEY" rapunzel . --provider openai --model gpt-5.6-luna
 ```
 
 The wrapper does not forward the host environment wholesale.
-It forwards only an allowlist of provider credentials, pi configuration variables, and proxy variables, plus variables explicitly named by `PI_DOCKER_API_KEY_VARIABLE`.
-The same allowlist filters `PI_DOCKER_ENV_FILE`: entries whose names are not allowlisted are dropped with a warning, so the file cannot set `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, `PATH`, or other container-affecting variables.
-`PI_DOCKER_HEADERS_JSON` values are written to `models.json` inside the volume, so avoid credentials there; the bootstrap warns when it detects a credential-like header name.
+It forwards only an allowlist of provider credentials, pi configuration variables, and proxy variables, plus variables explicitly named by `RAPUNZEL_API_KEY_VARIABLE`.
+The same allowlist filters `RAPUNZEL_ENV_FILE`: entries whose names are not allowlisted are dropped with a warning, so the file cannot set `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, `PATH`, or other container-affecting variables.
+`RAPUNZEL_HEADERS_JSON` values are written to `models.json` inside the volume, so avoid credentials there; the bootstrap warns when it detects a credential-like header name.
 
 Pi also supports subscription credentials in `auth.json` and custom provider credentials in `models.json`.
 This runner intentionally does not copy either file from the host.
 Use the shell mode to run `/login`, edit `models.json`, or install resources into the volume:
 
 ```bash
-pi-project --shell
+rapunzel --shell
 ```
 
 The shell has the same project and agent-volume mounts, forwarded environment, non-root UID, network mode, and isolation flags as a normal run.
 It starts an interactive bash instead of pi.
 The shell mode requires a TTY and does not accept pi arguments.
-The container maps the caller's arbitrary UID/GID to the name `pi` (via libnss-wrapper and `setup-identity.sh`), so prompts, `whoami`, and `os.userInfo()` work without adding the host UID to `/etc/passwd`.
+The container maps the caller's arbitrary UID/GID to the name `agent` (via libnss-wrapper and `setup-identity.sh`), so prompts, `whoami`, and `os.userInfo()` work without adding the host UID to `/etc/passwd`.
 
 ## What pi needs at runtime
 
@@ -116,7 +120,7 @@ These match pi's official Plain Docker example.
 The image deliberately does not include Python, jq, curl, compilers, or language-specific build toolchains.
 Install project-specific tools in a project image or extend this Dockerfile when a project genuinely needs them.
 
-Pi's runtime state is under `PI_CODING_AGENT_DIR`, set here to `/home/pi/.pi/agent`:
+Pi's runtime state is under `PI_CODING_AGENT_DIR`, set here to `/home/agent/.pi/agent`:
 
 - `settings.json` - global pi settings such as the provider/model defaults, project trust policy, session directory, tools, and resource paths.
 - `models.json` - custom provider and model definitions, including API base URLs and environment references for keys.
@@ -144,19 +148,19 @@ The per-project default avoids this collapse.
 
 ## Isolation properties
 
-Each normal `pi-project` run has exactly these intentional host mounts:
+Each normal `rapunzel` run has exactly these intentional host mounts:
 
 ```text
 PROJECT_DIR (read-write)            -> /workspace
 PROJECT_DIR/.git/config (read-only) -> /workspace/.git/config
 PROJECT_DIR/.git/hooks (read-only)  -> /workspace/.git/hooks
 in-project core.hooksPath (read-only, if set, e.g. .husky)
-named Docker volume                 -> /home/pi/.pi/agent
+named Docker volume                 -> /home/agent/.pi/agent
 ```
 
 The project is the only host directory mounted; the read-only entries are parts of it, described in [Files the host runs](#files-the-host-runs).
 The named volume is Docker-managed and contains pi's container-local settings, auth, trust state, resources, and sessions.
-The runner uses Docker's `volume-nocopy` mount option so image files under `/home/pi/.pi/agent` cannot seed or overwrite the volume.
+The runner uses Docker's `volume-nocopy` mount option so image files under `/home/agent/.pi/agent` cannot seed or overwrite the volume.
 The runtime uses a caller-mapped non-root UID, drops all Linux capabilities, and enables `no-new-privileges`.
 
 The following are deliberately not mounted or copied:
@@ -178,13 +182,13 @@ This relies on the container seeing the same numeric IDs as the host, which hold
 pi can write anything in the project, including files that tools on the host later run on their own: git hooks, git config entries such as `core.fsmonitor` or `core.hooksPath`, `.envrc`, editor tasks, and package scripts.
 A planted file like that runs outside the container the next time you use git, enter the directory, or open the project in an editor, regardless of any egress control.
 
-`pi-project` limits this in two ways:
+`rapunzel` limits this in two ways:
 
-- **Read-only git control files.** `.git/config`, `.git/hooks`, and a `core.hooksPath` directory inside the project (such as `.husky`) are mounted read-only. pi can still commit, branch, and stash, but cannot add hooks or change what git runs. Commands that write the repository config, such as `git config` or `git push -u`, fail inside the container. If `.git/hooks` does not exist, `pi-project` creates it on the host first, so it can be mounted.
-- **A change report.** Before pi starts, `pi-project` records hashes of files the host commonly runs; when pi exits, it lists every one that was added, modified, or removed:
+- **Read-only git control files.** `.git/config`, `.git/hooks`, and a `core.hooksPath` directory inside the project (such as `.husky`) are mounted read-only. pi can still commit, branch, and stash, but cannot add hooks or change what git runs. Commands that write the repository config, such as `git config` or `git push -u`, fail inside the container. If `.git/hooks` does not exist, `rapunzel` creates it on the host first, so it can be mounted.
+- **A change report.** Before pi starts, `rapunzel` records hashes of files the host commonly runs; when pi exits, it lists every one that was added, modified, or removed:
 
   ```text
-  pi-project: pi changed files that the host may run on its own.
+  rapunzel: pi changed files that the host may run on its own.
   Review them before running git, direnv, your editor, or build tools in this project:
     added: .envrc
     modified: package.json
@@ -207,8 +211,8 @@ Keeping the directory in a named volume makes the container's settings and sessi
 
 - **Rootless Docker and `userns-remap`.** The runner maps the caller's numeric UID/GID into the container, assuming the container sees the same IDs as the host. A rootless daemon or a rootful daemon with `userns-remap` shifts those IDs, so the project bind mount may not be writable. Use the default rootful daemon, or pass `--userns=host` (rootful only) as an explicit opt-in that weakens namespace isolation. Rootless Docker is not supported out of the box.
 - **SELinux hosts.** On enforcing hosts such as Fedora, the project bind mount may need a relabel. Add `:z` to the project mount or set the SELinux context; the wrapper does not relabel automatically because that modifies the host project.
-- **Shared volumes.** The marker-based ownership helper targets a single UID/GID. If you deliberately share one volume across host users with `PI_DOCKER_VOLUME`, first use by a new owner re-chowns it; do not run two owners against the same volume concurrently.
-- **Identity shim.** The container preloads the fixed library path `/usr/local/lib/libnss_wrapper.so` so the arbitrary UID resolves to `pi`. `LD_PRELOAD` is inherited by agent-spawned processes; it is always set to that path and never taken from the environment.
+- **Shared volumes.** The marker-based ownership helper targets a single UID/GID. If you deliberately share one volume across host users with `RAPUNZEL_VOLUME`, first use by a new owner re-chowns it; do not run two owners against the same volume concurrently.
+- **Identity shim.** The container preloads the fixed library path `/usr/local/lib/libnss_wrapper.so` so the arbitrary UID resolves to `agent`. `LD_PRELOAD` is inherited by agent-spawned processes; it is always set to that path and never taken from the environment.
 - **Base image.** `node:24-bookworm-slim` is referenced by tag rather than digest for cross-architecture portability; pin a digest if you need reproducible builds.
 
 ## Verify isolation
@@ -228,14 +232,14 @@ It verifies that:
 - Host-looking paths such as `/Users`, `/Volumes`, `/private`, host `.pi`, and host `.ssh` are not visible.
 - `/proc/self/mountinfo` contains the project and agent mounts but no host home-related bind mount.
 
-The optional `PI_DOCKER_VOLUME` variable selects the volume used by the check.
+The optional `RAPUNZEL_VOLUME` variable selects the volume used by the check.
 Use a throwaway volume for a clean check:
 
 ```bash
-PI_DOCKER_VOLUME=pi-project-isolation-check ./verify-isolation.sh .
+RAPUNZEL_VOLUME=rapunzel-isolation-check ./verify-isolation.sh .
 ```
 
-`pi-project`, `pi-ext`, and `verify-isolation.sh` share the same marker-based, hardened, networkless helper in `lib/volumes.sh`, so a second run skips the recursive `chown` when the owner is unchanged.
+`rapunzel`, `rapunzel-ext`, and `verify-isolation.sh` share the same marker-based, hardened, networkless helper in `lib/volumes.sh`, so a second run skips the recursive `chown` when the owner is unchanged.
 
 ## Test pi and session persistence
 
@@ -243,20 +247,20 @@ A provider-backed prompt requires a valid API endpoint and key.
 The following smoke test uses a custom provider configured through a protected env-file outside the repository:
 
 ```bash
-ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/pi-docker"
+ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/rapunzel"
 mkdir -p "$ENV_DIR"
 ENV_FILE="$ENV_DIR/smoke-test.env"
 cat >"$ENV_FILE" <<'EOF'
-PI_DOCKER_PROVIDER=example
-PI_DOCKER_API_BASE_URL=https://api.example.invalid/v1
-PI_DOCKER_API=openai-completions
-PI_DOCKER_MODEL=test-model
-PI_DOCKER_API_KEY_VARIABLE=PI_DOCKER_API_KEY
-PI_DOCKER_API_KEY=replace-me
+RAPUNZEL_PROVIDER=example
+RAPUNZEL_API_BASE_URL=https://api.example.invalid/v1
+RAPUNZEL_API=openai-completions
+RAPUNZEL_MODEL=test-model
+RAPUNZEL_API_KEY_VARIABLE=RAPUNZEL_API_KEY
+RAPUNZEL_API_KEY=replace-me
 EOF
 chmod 600 "$ENV_FILE"
 
-PI_DOCKER_ENV_FILE="$ENV_FILE" pi-project /tmp/pi-test -p "Reply with the single word hello"
+RAPUNZEL_ENV_FILE="$ENV_FILE" rapunzel /tmp/pi-test -p "Reply with the single word hello"
 ```
 
 Replace the endpoint, model, and key with a real provider before running this test.
@@ -265,7 +269,7 @@ Replace the endpoint, model, and key with a real provider before running this te
 To verify that a session was persisted in the named volume without exposing it on the host:
 
 ```bash
-VOLUME=pi-project-agent-<hash>
+VOLUME=rapunzel-agent-<hash>
 docker run --rm \
   --mount "type=volume,src=$VOLUME,dst=/data,readonly" \
   alpine:3.20 sh -c 'find /data/sessions -type f -name "*.jsonl" -print'
@@ -280,14 +284,14 @@ The image pins pi at the `PI_VERSION` build argument's value.
 Rebuild with a deliberate version change:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=1.0.1 -t pi-project-sandbox .
+docker build --pull --build-arg PI_VERSION=1.0.1 -t rapunzel .
 ```
 
 The named volumes persist across image updates.
 Back one up or delete it deliberately if you want to reset container-local settings and sessions:
 
 ```bash
-docker volume rm pi-project-agent-<hash>
+docker volume rm rapunzel-agent-<hash>
 ```
 
 ## Skills and extensions
@@ -296,14 +300,14 @@ For project-specific resources, put `.pi/skills`, `.pi/extensions`, or `.agents/
 Review those files and approve the project before using them.
 They remain project-owned and are not copied into the image.
 
-For container-local user resources, install or create them inside the container at `/home/pi/.pi/agent/skills` or `/home/pi/.pi/agent/extensions`.
+For container-local user resources, install or create them inside the container at `/home/agent/.pi/agent/skills` or `/home/agent/.pi/agent/extensions`.
 Those resources persist in the named volume and are isolated from the host.
 Global pi settings can list additional resource paths, packages, skills, extensions, prompts, or themes.
 Remember that extensions and skills are executable instructions/code and should be treated as trusted input.
 
 ### Curated host extensions
 
-`pi-ext` treats the host `~/.pi-extensions/` directory as a local, trusted source of extension content.
+`rapunzel-ext` treats the host `~/.pi-extensions/` directory as a local, trusted source of extension content.
 It does not use a catalog or hashes.
 Symlinks are resolved and copied as real files into the selected volume, and repeated syncs are safe.
 The volume remains the only location pi reads at runtime.
@@ -313,8 +317,8 @@ Sync to the per-project volume and inspect curated versus installed entries:
 
 ```bash
 mkdir -p ~/.pi-extensions
-pi-ext sync
-pi-ext list
+rapunzel-ext sync
+rapunzel-ext list
 ```
 
 Each top-level entry of the curated directory becomes one extension, and pi loads a directory through its `index.ts` or `index.js`.
@@ -326,11 +330,11 @@ ln -s ~/src/pi_extensions/model-catalogs ~/.pi-extensions/omniroute/model-catalo
 echo 'export { default } from "./model-catalogs/omniroute/index.ts";' > ~/.pi-extensions/omniroute/index.ts
 ```
 
-`pi-ext sync` copies the symlinked tree as real files, so the relative imports keep working inside the volume.
+`rapunzel-ext sync` copies the symlinked tree as real files, so the relative imports keep working inside the volume.
 
-Set `PI_EXTENSIONS_DIR` to use another curated directory.
-Without a project directory, `pi-ext` uses the current directory's volume.
-Set `PI_DOCKER_VOLUME` to target an explicitly shared volume instead.
+Set `RAPUNZEL_EXTENSIONS_DIR` to use another curated directory.
+Without a project directory, `rapunzel-ext` uses the current directory's volume.
+Set `RAPUNZEL_VOLUME` to target an explicitly shared volume instead.
 After syncing, run `/reload` in pi to hot-reload extensions.
 Only sync extensions you trust, since they execute inside pi.
 
@@ -344,30 +348,30 @@ The project bind mount is also readable by that code.
 For offline work, disable networking explicitly:
 
 ```bash
-PI_DOCKER_NETWORK=none pi-project . --offline
+RAPUNZEL_NETWORK=none rapunzel . --offline
 ```
 
 ### Egress control
 
-`PI_DOCKER_EGRESS` restricts what pi can reach.
+`RAPUNZEL_EGRESS` restricts what pi can reach.
 [Egress control: architecture and decisions](egress.md) explains the design, the alternatives that were rejected, and the remaining risks.
 
 | Mode | pi holds the provider credential | pi can reach | `/login` subscriptions |
 |---|---|---|---|
 | `open` (default) | yes | the internet | yes |
-| `allowlist` | yes | only allowlisted hosts over HTTPS | yes, with `PI_DOCKER_EGRESS_LOGINS` |
+| `allowlist` | yes | only allowlisted hosts over HTTPS | yes, with `RAPUNZEL_EGRESS_LOGINS` |
 | `strict` | no, only a placeholder | only fixed provider routes on a credential gateway | no, API keys only |
 
 Both restricted modes put pi on a per-run Docker network created with `--internal` and isolated gateway mode, so it has no route off that network, no upstream DNS, and no address on the host side of the bridge.
 The only other member is a sidecar container, which is pi's only way out.
 The sidecar and both networks are removed when pi exits.
-Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`, and cannot be combined with `PI_DOCKER_NETWORK`.
+Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`, and cannot be combined with `RAPUNZEL_NETWORK`.
 
 ### allowlist mode
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=allowlist pi-project
-PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai pi-project   # ChatGPT subscription via /login
+ANTHROPIC_API_KEY=sk-ant-... RAPUNZEL_EGRESS=allowlist rapunzel
+RAPUNZEL_EGRESS=allowlist RAPUNZEL_EGRESS_LOGINS=openai rapunzel   # ChatGPT subscription via /login
 ```
 
 The sidecar is [Pipelock](https://github.com/luckyPipewrench/pipelock), an HTTPS CONNECT proxy.
@@ -379,18 +383,18 @@ The allowlist is built from the configuration:
 
 - `ANTHROPIC_API_KEY` allows `api.anthropic.com`;
 - `OPENAI_API_KEY` allows `api.openai.com`;
-- `PI_DOCKER_API_BASE_URL` allows that URL's host;
-- `PI_DOCKER_EGRESS_LOGINS` adds the hosts of providers you signed in to with `/login`, see below;
-- `PI_DOCKER_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`;
-- `PI_DOCKER_EGRESS_ALLOW_PRIVATE` adds exact hosts that resolve to a private address, see below.
+- `RAPUNZEL_API_BASE_URL` allows that URL's host;
+- `RAPUNZEL_EGRESS_LOGINS` adds the hosts of providers you signed in to with `/login`, see below;
+- `RAPUNZEL_EGRESS_ALLOW` adds comma-separated hosts; `*.example.com` also matches `example.com`;
+- `RAPUNZEL_EGRESS_ALLOW_PRIVATE` adds exact hosts that resolve to a private address, see below.
 
-`pi-project` prints the final list on startup.
+`rapunzel` prints the final list on startup.
 
 A `/login` subscription keeps its OAuth tokens in `auth.json` inside the agent volume, so pi holds them in every mode.
-Name the providers you use in `PI_DOCKER_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts.
+Name the providers you use in `RAPUNZEL_EGRESS_LOGINS` (comma-separated) to allow their model API and token refresh hosts.
 The names are pi's provider IDs, the same keys `/login` writes to `auth.json`:
 
-| `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
+| `/login` provider (`RAPUNZEL_EGRESS_LOGINS`) | Allowed hosts |
 |---|---|
 | `openai` (ChatGPT subscription, "Sign in with ChatGPT") | `api.openai.com`, `auth.openai.com` |
 | `openai-codex` (pi's legacy ChatGPT Plus/Pro login) | `chatgpt.com`, `auth.openai.com` |
@@ -398,52 +402,52 @@ The names are pi's provider IDs, the same keys `/login` writes to `auth.json`:
 | `github-copilot` | `api.github.com`, `*.githubcopilot.com` |
 
 These lists come from pi 0.99.1's provider code.
-`pi-project` never reads them from `auth.json`, because pi can edit that file and would otherwise choose its own allowlist.
+`rapunzel` never reads them from `auth.json`, because pi can edit that file and would otherwise choose its own allowlist.
 `github-copilot` also allows `api.github.com`, which exposes GitHub's whole API to the token pi holds.
 `/login` works inside the container: the browser cannot reach pi's callback there, so paste the redirect URL when pi asks for it, or choose the device-code option. It needs the same hosts, and the tokens then persist in the project's volume.
 Package registries and GitHub are not allowed by default, because they accept uploads with any token; install dependencies before the session, in `open` mode.
 
 The proxy refuses private, loopback, and link-local destinations after resolving a name, even for an allowlisted host.
-A model router or gateway on your local network, for example `router.lan` at `10.1.0.11`, therefore needs `PI_DOCKER_EGRESS_ALLOW_PRIVATE=router.lan`.
+A model router or gateway on your local network, for example `router.lan` at `10.1.0.11`, therefore needs `RAPUNZEL_EGRESS_ALLOW_PRIVATE=router.lan`.
 It takes exact names only, no wildcards: whoever controls a name's DNS decides where it points, so list only names whose DNS you control.
 Cloud metadata and link-local addresses stay blocked regardless.
 
 ### strict mode
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... PI_DOCKER_EGRESS=strict pi-project
+ANTHROPIC_API_KEY=sk-ant-... RAPUNZEL_EGRESS=strict rapunzel
 ```
 
 The sidecar is a [Caddy](https://caddyserver.com/) reverse proxy that holds the real keys.
-The bootstrap points pi's providers at `http://llm-proxy:8080` with the placeholder key `pi-docker-gateway`.
+The bootstrap points pi's providers at `http://llm-proxy:8080` with the placeholder key `rapunzel-gateway`.
 The gateway serves only fixed routes and answers everything else with `403`:
 
 | Route | Upstream | Credential | Header the gateway sets |
 |---|---|---|---|
 | `/anthropic/*` | `https://api.anthropic.com` | `ANTHROPIC_API_KEY` | `x-api-key` |
 | `/openai/*` | `https://api.openai.com` | `OPENAI_API_KEY` | `Authorization: Bearer` |
-| `/custom/*` | `PI_DOCKER_API_BASE_URL` | `PI_DOCKER_API_KEY` or `PI_DOCKER_API_KEY_VARIABLE` | `x-api-key` for `anthropic-messages`, otherwise `Authorization: Bearer` |
+| `/custom/*` | `RAPUNZEL_API_BASE_URL` | `RAPUNZEL_API_KEY` or `RAPUNZEL_API_KEY_VARIABLE` | `x-api-key` for `anthropic-messages`, otherwise `Authorization: Bearer` |
 
 The gateway always overwrites these headers and removes the other one, so pi cannot use an allowed provider with a credential of its own, for example to upload data to a provider's file API under an attacker's account.
 Requests and responses are otherwise passed through unchanged and streamed without buffering.
-Credentials can come from the host environment or from `PI_DOCKER_ENV_FILE`; the gateway reads them from a temporary env-file that is deleted after the run.
+Credentials can come from the host environment or from `RAPUNZEL_ENV_FILE`; the gateway reads them from a temporary env-file that is deleted after the run.
 
 Limitations of strict mode:
 
-- Only the three routes above are supported. Other provider keys, `PI_DOCKER_HEADERS_JSON`, and proxy variables are not passed, and `pi-project` names them in a warning.
+- Only the three routes above are supported. Other provider keys, `RAPUNZEL_HEADERS_JSON`, and proxy variables are not passed, and `rapunzel` names them in a warning.
 - Credentials stored with `/login` live in `auth.json` inside the agent volume, where the gateway cannot protect them. The bootstrap warns when `auth.json` is not empty; run `/logout` to remove them.
 
 ### Extension providers
 
 Some providers come from a pi extension rather than from pi itself, for example a catalog extension for a model router such as OmniRoute.
 Such an extension reads its endpoint and key from variables of its own, such as `OMNIROUTE_BASE_URL` and `OMNIROUTE_API_KEY`.
-Name them, and let `pi-project` fill them in for each mode:
+Name them, and let `rapunzel` fill them in for each mode:
 
 ```bash
-# ~/.config/pi-docker/omniroute.env (chmod 600)
-PI_DOCKER_API_BASE_URL=https://omniroute.example.lan/v1
-PI_DOCKER_BASE_URL_VARIABLE=OMNIROUTE_BASE_URL
-PI_DOCKER_API_KEY_VARIABLE=OMNIROUTE_API_KEY
+# ~/.config/rapunzel/omniroute.env (chmod 600)
+RAPUNZEL_API_BASE_URL=https://omniroute.example.lan/v1
+RAPUNZEL_BASE_URL_VARIABLE=OMNIROUTE_BASE_URL
+RAPUNZEL_API_KEY_VARIABLE=OMNIROUTE_API_KEY
 OMNIROUTE_API_KEY=replace-me
 ```
 
@@ -451,11 +455,11 @@ OMNIROUTE_API_KEY=replace-me
 |---|---|---|
 | `open` | the real URL | the real key |
 | `allowlist` | the real URL; its host is allowlisted automatically | the real key |
-| `strict` | `http://llm-proxy:8080/custom`, the gateway's custom route | the placeholder `pi-docker-gateway`; the gateway sends the real key upstream |
+| `strict` | `http://llm-proxy:8080/custom`, the gateway's custom route | the placeholder `rapunzel-gateway`; the gateway sends the real key upstream |
 
-Without `PI_DOCKER_PROVIDER` and `PI_DOCKER_MODEL`, the bootstrap registers no provider of its own, so only the extension's provider appears.
-Install the extension into the project's volume with `pi-ext` (see [Curated host extensions](#curated-host-extensions)).
-If the router resolves to a private address, add `PI_DOCKER_EGRESS_ALLOW_PRIVATE` with its host for `allowlist` mode.
+Without `RAPUNZEL_PROVIDER` and `RAPUNZEL_MODEL`, the bootstrap registers no provider of its own, so only the extension's provider appears.
+Install the extension into the project's volume with `rapunzel-ext` (see [Curated host extensions](#curated-host-extensions)).
+If the router resolves to a private address, add `RAPUNZEL_EGRESS_ALLOW_PRIVATE` with its host for `allowlist` mode.
 
 ### What egress control does not cover
 

@@ -23,9 +23,9 @@ jobs:
             lib/egress.sh \
             lib/host-files.sh \
             lib/volumes.sh \
-            pi-docker-shell \
-            pi-ext \
-            pi-project \
+            rapunzel \
+            rapunzel-ext \
+            rapunzel-shell \
             setup-identity.sh \
             test.sh \
             verify-egress.sh \
@@ -40,7 +40,7 @@ jobs:
           node --check lib/prune-foreign-platforms.mjs
 
       - name: Build image
-        run: docker build --pull -t pi-project-sandbox .
+        run: docker build --pull -t rapunzel .
 
       - name: Offline smoke test
         run: ./test.sh

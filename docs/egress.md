@@ -1,6 +1,6 @@
 # Egress control: architecture and decisions
 
-This document describes how pi-docker restricts the network access of the agent container, why it is built this way, and what it does not protect against.
+This document describes how rapunzel restricts the network access of the agent container, why it is built this way, and what it does not protect against.
 For day-to-day use, see the [guide](guide.md#egress-control).
 
 ## Goal and threat model
@@ -14,7 +14,7 @@ Untrusted: the agent process, every process it starts, the mounted project's con
 
 ## Modes
 
-`PI_DOCKER_EGRESS` selects one of three modes.
+`RAPUNZEL_EGRESS` selects one of three modes.
 
 | Mode | pi holds the provider credential | pi can reach | Use when |
 |---|---|---|---|
@@ -28,7 +28,7 @@ Both restricted modes share the same network layout and differ only in the sidec
 
 ```mermaid
 flowchart LR
-  subgraph run["one pi-project run"]
+  subgraph run["one rapunzel run"]
     pi["pi container"]
     sidecar["egress sidecar<br/>allowlist: Pipelock<br/>strict: Caddy"]
   end
@@ -60,10 +60,10 @@ The allowlist is derived from the configuration:
 |---|---|
 | `ANTHROPIC_API_KEY` | `api.anthropic.com` |
 | `OPENAI_API_KEY` | `api.openai.com` |
-| `PI_DOCKER_API_BASE_URL` | that URL's host |
-| `PI_DOCKER_EGRESS_LOGINS` | the model API and token refresh hosts of each named `/login` provider, see [D11](#d11-login-providers-are-named-on-the-host) |
-| `PI_DOCKER_EGRESS_ALLOW` | each comma-separated host; `*.example.com` also matches `example.com` |
-| `PI_DOCKER_EGRESS_ALLOW_PRIVATE` | each exact host, also written to Pipelock's `trusted_domains`, so it may resolve to a private address, see [D12](#d12-private-hosts-are-exact-and-explicit) |
+| `RAPUNZEL_API_BASE_URL` | that URL's host |
+| `RAPUNZEL_EGRESS_LOGINS` | the model API and token refresh hosts of each named `/login` provider, see [D11](#d11-login-providers-are-named-on-the-host) |
+| `RAPUNZEL_EGRESS_ALLOW` | each comma-separated host; `*.example.com` also matches `example.com` |
+| `RAPUNZEL_EGRESS_ALLOW_PRIVATE` | each exact host, also written to Pipelock's `trusted_domains`, so it may resolve to a private address, see [D12](#d12-private-hosts-are-exact-and-explicit) |
 
 The launcher renders a [Pipelock](https://github.com/luckyPipewrench/pipelock) config with:
 
@@ -211,7 +211,7 @@ A tag can be moved; a digest cannot.
 
 **Decision.**
 Only the configured provider hosts are allowed.
-Anything else needs `PI_DOCKER_EGRESS_ALLOW`.
+Anything else needs `RAPUNZEL_EGRESS_ALLOW`.
 
 **Why.**
 Registries and GitHub accept uploads with any token: `npm publish`, gists, pushes.
@@ -221,10 +221,10 @@ Install dependencies in `open` mode, or from a read-only mirror, before an `allo
 ### D11: Login providers are named on the host
 
 **Decision.**
-`/login` (OAuth) subscriptions are supported in `allowlist` mode only, through `PI_DOCKER_EGRESS_LOGINS`.
+`/login` (OAuth) subscriptions are supported in `allowlist` mode only, through `RAPUNZEL_EGRESS_LOGINS`.
 Each name expands to fixed hosts in `lib/egress.sh`, taken from pi's provider code:
 
-| `/login` provider (`PI_DOCKER_EGRESS_LOGINS`) | Allowed hosts |
+| `/login` provider (`RAPUNZEL_EGRESS_LOGINS`) | Allowed hosts |
 |---|---|
 | `openai` (ChatGPT subscription, "Sign in with ChatGPT") | `api.openai.com`, `auth.openai.com` |
 | `openai-codex` (pi's legacy ChatGPT Plus/Pro login) | `chatgpt.com`, `auth.openai.com` |
@@ -244,7 +244,7 @@ pi can write that file, so it could add a provider and widen its own allowlist f
 ### D12: Private hosts are exact and explicit
 
 **Decision.**
-`PI_DOCKER_EGRESS_ALLOW_PRIVATE` lists exact host names that may resolve to private addresses.
+`RAPUNZEL_EGRESS_ALLOW_PRIVATE` lists exact host names that may resolve to private addresses.
 Each name goes into both `api_allowlist` and Pipelock's `trusted_domains`.
 Wildcards are refused, and the setting exists only in `allowlist` mode.
 
@@ -260,8 +260,8 @@ Cloud metadata and link-local ranges stay blocked; Pipelock does not let them be
 
 Ranked by the security review:
 
-1. **Host code execution through the project mount (critical).** pi can write files the host later runs, such as `.git/hooks`, `.git/config` (`core.fsmonitor`, `core.hooksPath`), `.vscode/tasks.json`, `.envrc`, package scripts, CI workflows, and agent hook settings. Running git or opening an IDE afterwards bypasses every network control. Partly mitigated: `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` are mounted read-only, and `pi-project` reports changes to other host-executed files after each run (see [Files the host runs](guide.md#files-the-host-runs)). Everything except git config and hooks is detected, not prevented.
-2. **Data sent out through allowed hosts (high).** pi can send anything it reads to an allowed provider: under your key in `allowlist` mode, or under an attacker's key unless `strict` is used. The same applies to every host added with `PI_DOCKER_EGRESS_ALLOW` or `PI_DOCKER_EGRESS_LOGINS`. With a `/login` subscription, pi also holds a refresh token, which stays valid beyond the session if it leaks. Sign out (`/logout`) to revoke it after untrusted work.
+1. **Host code execution through the project mount (critical).** pi can write files the host later runs, such as `.git/hooks`, `.git/config` (`core.fsmonitor`, `core.hooksPath`), `.vscode/tasks.json`, `.envrc`, package scripts, CI workflows, and agent hook settings. Running git or opening an IDE afterwards bypasses every network control. Partly mitigated: `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` are mounted read-only, and `rapunzel` reports changes to other host-executed files after each run (see [Files the host runs](guide.md#files-the-host-runs)). Everything except git config and hooks is detected, not prevented.
+2. **Data sent out through allowed hosts (high).** pi can send anything it reads to an allowed provider: under your key in `allowlist` mode, or under an attacker's key unless `strict` is used. The same applies to every host added with `RAPUNZEL_EGRESS_ALLOW` or `RAPUNZEL_EGRESS_LOGINS`. With a `/login` subscription, pi also holds a refresh token, which stays valid beyond the session if it leaks. Sign out (`/logout`) to revoke it after untrusted work.
 3. **Encrypted Client Hello (medium, unverified).** With ECH, the outer SNI can name an allowed host while the inner one names another site on the same CDN. Pipelock has no ECH handling.
 4. **Allowlist creep (medium).** Each added host widens the path out.
 5. **Agent-volume tampering (medium).** Extensions, settings, and trust decisions persist in the agent volume and run again in the next session.
@@ -274,18 +274,18 @@ Ranked by the security review:
 A listener on the host network acts as a canary.
 
 - **Both modes:** no external DNS, no direct IPv4 or IPv6, no cloud metadata, and the host canary is unreachable through `host.docker.internal` and through the network's gateway address.
-- **allowlist** (needs internet), run with `api.openai.com` allowed through `OPENAI_API_KEY`, with `chatgpt.com` through `PI_DOCKER_EGRESS_LOGINS=openai-codex`, and twice against a self-signed HTTPS server behind a `nip.io` name that resolves to a private address:
+- **allowlist** (needs internet), run with `api.openai.com` allowed through `OPENAI_API_KEY`, with `chatgpt.com` through `RAPUNZEL_EGRESS_LOGINS=openai-codex`, and twice against a self-signed HTTPS server behind a `nip.io` name that resolves to a private address:
   - an allowed host works with `fetch` and through a raw tunnel;
   - other hosts are refused;
   - a mismatched SNI, a missing SNI, and plaintext inside a tunnel are refused;
   - IP literals, metadata, `host.docker.internal`, and plain `http://` are refused;
   - the proxy's `/stats` and `/fetch` endpoints expose nothing;
-  - the private host is refused with only `PI_DOCKER_EGRESS_ALLOW`, and reachable with `PI_DOCKER_EGRESS_ALLOW_PRIVATE`.
+  - the private host is refused with only `RAPUNZEL_EGRESS_ALLOW`, and reachable with `RAPUNZEL_EGRESS_ALLOW_PRIVATE`.
 - **strict** (offline; an echo server stands in for the provider):
   - the upstream is reachable only through the gateway;
   - the gateway answers unknown routes and unconfigured providers with `403`;
   - the gateway replaces the agent's credentials, and no real key reaches pi's environment or `models.json`;
-  - the variables named by `PI_DOCKER_BASE_URL_VARIABLE` and `PI_DOCKER_API_KEY_VARIABLE` hold the gateway route and the placeholder.
+  - the variables named by `RAPUNZEL_BASE_URL_VARIABLE` and `RAPUNZEL_API_KEY_VARIABLE` hold the gateway route and the placeholder.
 - **Afterwards:** no sidecar container or network is left behind.
 
 CI runs it on every pull request.
@@ -295,7 +295,7 @@ Tested on Docker Desktop 29 (macOS, arm64) and Docker Engine 28 (Ubuntu, CI); WS
 
 1. Let pi work in a clone that the host fetches from, so changes are reviewed before they reach the host's working tree. Read-only git control files and the change report are in place.
 2. Test on WSL2 (NAT networking).
-3. Use scoped, spend-limited provider keys, and make the extensions directory read-only, managed through `pi-ext`.
+3. Use scoped, spend-limited provider keys, and make the extensions directory read-only, managed through `rapunzel-ext`.
 4. Add per-agent allowlist defaults when Claude Code, Codex, and Copilot are supported. Copilot needs `api.github.com`, which opens GitHub's write API, so it should be opt-in.
 5. Evaluate Docker Sandboxes as a backend for agents other than pi.
 

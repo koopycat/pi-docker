@@ -2,7 +2,7 @@
 # shellcheck disable=SC2034 # EGRESS_*/GATEWAY_* variables are read by the sourcing script
 # Egress control: per-run networks plus one sidecar that is pi's only way out.
 #
-# Source this file from pi-project. It defines:
+# Source this file from rapunzel. It defines:
 #   egress_networks_create - create the per-run internal and outbound networks
 #   egress_allow_host      - add a validated host to the allowlist
 #   egress_allow_login     - add the hosts a pi /login provider needs
@@ -19,17 +19,17 @@
 # per-run bridge of its own, so it never shares a network with unrelated
 # containers. See docs/egress.md for the design and its decisions.
 
-EGRESS_PROXY_IMAGE=${PI_DOCKER_EGRESS_PROXY_IMAGE:-ghcr.io/luckypipewrench/pipelock:3.5.0@sha256:73e5d240f2ae02392c7de9c8858e9dee164396382c13e0ea95b4a497b2567965}
+EGRESS_PROXY_IMAGE=${RAPUNZEL_EGRESS_PROXY_IMAGE:-ghcr.io/luckypipewrench/pipelock:3.5.0@sha256:73e5d240f2ae02392c7de9c8858e9dee164396382c13e0ea95b4a497b2567965}
 EGRESS_PROXY_ALIAS=egress
 EGRESS_PROXY_PORT=8888
 EGRESS_PROXY_URL="http://${EGRESS_PROXY_ALIAS}:${EGRESS_PROXY_PORT}"
 
-GATEWAY_IMAGE=${PI_DOCKER_GATEWAY_IMAGE:-caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b}
+GATEWAY_IMAGE=${RAPUNZEL_GATEWAY_IMAGE:-caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b}
 GATEWAY_ALIAS=llm-proxy
 GATEWAY_PORT=8080
 GATEWAY_URL="http://${GATEWAY_ALIAS}:${GATEWAY_PORT}"
 # Placeholder the agent sees wherever a provider expects a key.
-GATEWAY_DUMMY_KEY=pi-docker-gateway
+GATEWAY_DUMMY_KEY=rapunzel-gateway
 
 EGRESS_NETWORK=""
 EGRESS_OUTBOUND=""
@@ -45,27 +45,27 @@ egress_networks_create() {
 
     # Isolated gateway mode (Docker Engine 28+) leaves the bridge without a
     # host-side address, so pi cannot reach services on the host.
-    EGRESS_NETWORK="pi-docker-${run_id}"
+    EGRESS_NETWORK="rapunzel-${run_id}"
     if ! docker network create --internal \
         --opt com.docker.network.bridge.gateway_mode_ipv4=isolated \
         --opt com.docker.network.bridge.gateway_mode_ipv6=isolated \
-        --label pi-docker.egress=1 \
+        --label rapunzel.egress=1 \
         "$EGRESS_NETWORK" >/dev/null; then
         EGRESS_NETWORK=""
-        printf 'pi-project: could not create an isolated internal network; PI_DOCKER_EGRESS needs Docker Engine 28 or newer\n' >&2
+        printf 'rapunzel: could not create an isolated internal network; RAPUNZEL_EGRESS needs Docker Engine 28 or newer\n' >&2
         return 1
     fi
 
-    EGRESS_OUTBOUND="pi-docker-${run_id}-out"
+    EGRESS_OUTBOUND="rapunzel-${run_id}-out"
     if ! docker network create \
         --opt com.docker.network.bridge.enable_icc=false \
-        --label pi-docker.egress=1 \
+        --label rapunzel.egress=1 \
         "$EGRESS_OUTBOUND" >/dev/null; then
         EGRESS_OUTBOUND=""
-        printf 'pi-project: could not create the outbound network for the egress sidecar\n' >&2
+        printf 'rapunzel: could not create the outbound network for the egress sidecar\n' >&2
         return 1
     fi
-    EGRESS_SIDECAR="pi-docker-egress-${run_id}"
+    EGRESS_SIDECAR="rapunzel-egress-${run_id}"
 }
 
 # Add one allowlist entry after checking it is a plain DNS name.
@@ -74,7 +74,7 @@ egress_allow_host() {
     host=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
     [[ -n "$host" ]] || return 0
     if [[ ! "$host" =~ ^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$ ]]; then
-        printf 'pi-project: not an allowable host name: %s\n' "$1" >&2
+        printf 'rapunzel: not an allowable host name: %s\n' "$1" >&2
         return 1
     fi
     local known
@@ -90,7 +90,7 @@ egress_allow_host() {
 # names: whoever controls a name's DNS decides where it points.
 egress_allow_private_host() {
     if [[ "$1" == *'*'* ]]; then
-        printf 'pi-project: PI_DOCKER_EGRESS_ALLOW_PRIVATE takes exact host names, not wildcards: %s\n' "$1" >&2
+        printf 'rapunzel: RAPUNZEL_EGRESS_ALLOW_PRIVATE takes exact host names, not wildcards: %s\n' "$1" >&2
         return 1
     fi
     egress_allow_host "$1" || return 1
@@ -114,7 +114,7 @@ egress_allow_login() {
         # enterprise). api.github.com also exposes GitHub's whole REST API.
         github-copilot) egress_allow_host api.github.com && egress_allow_host '*.githubcopilot.com' ;;
         *)
-            printf 'pi-project: unknown PI_DOCKER_EGRESS_LOGINS entry: %s (supported: openai, openai-codex, anthropic, github-copilot)\n' \
+            printf 'rapunzel: unknown RAPUNZEL_EGRESS_LOGINS entry: %s (supported: openai, openai-codex, anthropic, github-copilot)\n' \
                 "$1" >&2
             return 1
             ;;
@@ -124,7 +124,7 @@ egress_allow_login() {
 # Print the host of an http(s) URL, or fail.
 url_host() {
     if [[ ! "$1" =~ ^https?://([^/?#:@[:space:]]+)(:[0-9]+)?(/[^?#[:space:]]*)?$ ]]; then
-        printf 'pi-project: PI_DOCKER_API_BASE_URL is not an http(s) URL without credentials, query or fragment: %s\n' \
+        printf 'rapunzel: RAPUNZEL_API_BASE_URL is not an http(s) URL without credentials, query or fragment: %s\n' \
             "$1" >&2
         return 1
     fi
@@ -136,7 +136,7 @@ allowlist_configure() {
     local dir=${1:?allowlist_configure requires a directory}
     local host
     if [[ ${#EGRESS_HOSTS[@]} -eq 0 ]]; then
-        printf 'pi-project: PI_DOCKER_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, PI_DOCKER_API_BASE_URL, PI_DOCKER_EGRESS_LOGINS, PI_DOCKER_EGRESS_ALLOW, or PI_DOCKER_EGRESS_ALLOW_PRIVATE\n' >&2
+        printf 'rapunzel: RAPUNZEL_EGRESS=allowlist needs at least one host: set ANTHROPIC_API_KEY, OPENAI_API_KEY, RAPUNZEL_API_BASE_URL, RAPUNZEL_EGRESS_LOGINS, RAPUNZEL_EGRESS_ALLOW, or RAPUNZEL_EGRESS_ALLOW_PRIVATE\n' >&2
         return 1
     fi
     {
@@ -181,7 +181,7 @@ allowlist_start() {
     # config goes into an anonymous volume before the container starts.
     docker create \
         --name "$EGRESS_SIDECAR" \
-        --label pi-docker.egress=1 \
+        --label rapunzel.egress=1 \
         --network "$EGRESS_NETWORK" \
         --network-alias "$EGRESS_PROXY_ALIAS" \
         --user 65532:65532 \
@@ -226,7 +226,7 @@ gateway_configure() {
     fi
     if [[ -n "${GW_CUSTOM_URL:-}" ]]; then
         if [[ ! "$GW_CUSTOM_URL" =~ ^(https?://[^/?#@[:space:]]+)(/[^?#[:space:]]*)?$ ]]; then
-            printf 'pi-project: PI_DOCKER_API_BASE_URL is not an http(s) URL without credentials, query or fragment: %s\n' \
+            printf 'rapunzel: RAPUNZEL_API_BASE_URL is not an http(s) URL without credentials, query or fragment: %s\n' \
                 "$GW_CUSTOM_URL" >&2
             return 1
         fi
@@ -244,8 +244,8 @@ gateway_configure() {
 
     if [[ -z "$routes" ]]; then
         printf '%s\n' \
-            'pi-project: PI_DOCKER_EGRESS=strict needs ANTHROPIC_API_KEY, OPENAI_API_KEY, or a custom provider (PI_DOCKER_API_BASE_URL).' \
-            'pi-project: /login (subscription) credentials cannot stay outside the sandbox; use PI_DOCKER_EGRESS=allowlist with PI_DOCKER_EGRESS_LOGINS instead.' >&2
+            'rapunzel: RAPUNZEL_EGRESS=strict needs ANTHROPIC_API_KEY, OPENAI_API_KEY, or a custom provider (RAPUNZEL_API_BASE_URL).' \
+            'rapunzel: /login (subscription) credentials cannot stay outside the sandbox; use RAPUNZEL_EGRESS=allowlist with RAPUNZEL_EGRESS_LOGINS instead.' >&2
         return 1
     fi
 
@@ -294,7 +294,7 @@ gateway_start() {
     # without Docker Desktop file sharing and with remote Docker contexts.
     docker create \
         --name "$EGRESS_SIDECAR" \
-        --label pi-docker.egress=1 \
+        --label rapunzel.egress=1 \
         --network "$EGRESS_NETWORK" \
         --network-alias "$GATEWAY_ALIAS" \
         --user 65534:65534 \
@@ -326,7 +326,7 @@ _egress_wait() {
         fi
         sleep 0.1
     done
-    printf 'pi-project: the egress sidecar did not become ready after %s attempts:\n' "$attempt" >&2
+    printf 'rapunzel: the egress sidecar did not become ready after %s attempts:\n' "$attempt" >&2
     docker logs --tail 20 "$EGRESS_SIDECAR" >&2 || true
     return 1
 }

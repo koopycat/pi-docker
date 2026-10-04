@@ -52,11 +52,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Run the Pi coding agent in Docker with isolated per-project state.
+            org.opencontainers.image.description=Hardened Docker sandbox for coding-agent harnesses, starting with pi, with isolated per-project state.
             org.opencontainers.image.licenses=MIT
           annotations: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.description=Run the Pi coding agent in Docker with isolated per-project state.
+            org.opencontainers.image.description=Hardened Docker sandbox for coding-agent harnesses, starting with pi, with isolated per-project state.
             org.opencontainers.image.licenses=MIT
         env:
           DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index

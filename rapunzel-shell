@@ -4,6 +4,6 @@ set -Eeuo pipefail
 CONFIG_DIR="${PI_CODING_AGENT_DIR:-${HOME}/.pi/agent}"
 mkdir -p "$CONFIG_DIR"
 # shellcheck disable=SC1091
-source /usr/local/lib/pi-docker/setup-identity.sh
-node /usr/local/lib/pi-docker/bootstrap-config.mjs "$CONFIG_DIR"
+source /usr/local/lib/rapunzel/setup-identity.sh
+node /usr/local/lib/rapunzel/bootstrap-config.mjs "$CONFIG_DIR"
 exec /bin/bash -i

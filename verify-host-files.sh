@@ -2,9 +2,9 @@
 set -Eeuo pipefail
 
 # Checks the host-executed file protection through the real launcher: inside
-# the container, pi-project --exec tries to plant git hooks and git config and
+# the container, rapunzel --exec tries to plant git hooks and git config and
 # to change files the host runs. Writes to git config and hooks must fail, a
-# commit must still work, and pi-project must report the other changes.
+# commit must still work, and rapunzel must report the other changes.
 # Needs git on the host; no network or credentials.
 
 SCRIPT_PATH=${BASH_SOURCE[0]}
@@ -17,8 +17,8 @@ done
 ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/docker.sh
 source "${ROOT_DIR}/lib/docker.sh"
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-pi-project-host-files-check}
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+VOLUME=${RAPUNZEL_VOLUME:-rapunzel-host-files-check}
 
 require_docker verify-host-files.sh
 docker image inspect "$IMAGE" >/dev/null 2>&1 || {
@@ -30,8 +30,8 @@ command -v git >/dev/null 2>&1 || {
     exit 1
 }
 
-project=$(mktemp -d "${TMPDIR:-/tmp}/pi-host-files.XXXXXX")
-report=$(mktemp "${TMPDIR:-/tmp}/pi-host-files-report.XXXXXX")
+project=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-host-files.XXXXXX")
+report=$(mktemp "${TMPDIR:-/tmp}/rapunzel-host-files-report.XXXXXX")
 trap 'rm -rf "$project" "$report"' EXIT
 
 # A repository whose hooks live in the working tree, as with husky.
@@ -63,10 +63,10 @@ printf "echo hi\n" > .envrc
 printf "* filter=evil\n" > .git/info/attributes
 '
 output=$(
-    env -u PI_DOCKER_ENV_FILE -u PI_DOCKER_EGRESS \
-        PI_DOCKER_IMAGE="$IMAGE" \
-        PI_DOCKER_VOLUME="$VOLUME" \
-        "${ROOT_DIR}/pi-project" --exec "$project" bash -c "$attempts" 2>"$report"
+    env -u RAPUNZEL_ENV_FILE -u RAPUNZEL_EGRESS \
+        RAPUNZEL_IMAGE="$IMAGE" \
+        RAPUNZEL_VOLUME="$VOLUME" \
+        "${ROOT_DIR}/rapunzel" --exec "$project" bash -c "$attempts" 2>"$report"
 )
 
 failures=0
@@ -100,15 +100,15 @@ for expected in "added: .envrc" "added: .vscode/tasks.json" "added: .git/info/at
     if grep -qF "$expected" "$report"; then
         printf 'PASS reported %s\n' "$expected"
     else
-        fail "pi-project did not report '${expected}'"
+        fail "rapunzel did not report '${expected}'"
     fi
 done
 if grep -qF ".husky" "$report"; then
-    fail "pi-project reported an unchanged hooks directory"
+    fail "rapunzel reported an unchanged hooks directory"
 fi
 
 if [[ "$failures" -gt 0 ]]; then
-    printf -- '--- pi-project stderr ---\n' >&2
+    printf -- '--- rapunzel stderr ---\n' >&2
     cat "$report" >&2
     printf '%s check(s) failed\n' "$failures" >&2
     exit 1

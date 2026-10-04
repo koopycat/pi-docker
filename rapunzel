@@ -20,14 +20,14 @@ source "${SCRIPT_DIR}/lib/host-files.sh"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: pi-project [--shell] [PROJECT_DIR [pi arguments...]]
-       pi-project --exec PROJECT_DIR COMMAND [ARGS...]
+Usage: rapunzel [--shell] [PROJECT_DIR [pi arguments...]]
+       rapunzel --exec PROJECT_DIR COMMAND [ARGS...]
 
 PROJECT_DIR defaults to the current directory. Pi arguments need an explicit
-PROJECT_DIR in front of them, for example: pi-project . --continue
+PROJECT_DIR in front of them, for example: rapunzel . --continue
 
 Build the image first with:
-  docker build -t pi-project-sandbox .
+  docker build -t rapunzel .
 
 Options:
   --shell                 Open an interactive bash with the same mounts and env.
@@ -35,20 +35,20 @@ Options:
   -h, --help              Show this help.
 
 Environment:
-  PI_DOCKER_IMAGE         Image name (default: pi-project-sandbox)
-  PI_DOCKER_VOLUME        Agent volume (default: per-project volume)
-  PI_DOCKER_ENV_FILE      Optional Docker env-file containing runtime secrets
-  PI_DOCKER_NETWORK       Docker network mode (default: bridge)
-  PI_DOCKER_EGRESS        open (default), allowlist, or strict (docs/egress.md)
-  PI_DOCKER_EGRESS_ALLOW  Extra hosts for allowlist mode, comma-separated
-  PI_DOCKER_EGRESS_LOGINS /login providers for allowlist mode, comma-separated:
+  RAPUNZEL_IMAGE          Image name (default: rapunzel)
+  RAPUNZEL_VOLUME         Agent volume (default: per-project volume)
+  RAPUNZEL_ENV_FILE       Optional Docker env-file containing runtime secrets
+  RAPUNZEL_NETWORK        Docker network mode (default: bridge)
+  RAPUNZEL_EGRESS         open (default), allowlist, or strict (docs/egress.md)
+  RAPUNZEL_EGRESS_ALLOW   Extra hosts for allowlist mode, comma-separated
+  RAPUNZEL_EGRESS_LOGINS  /login providers for allowlist mode, comma-separated:
                           openai, openai-codex, anthropic, github-copilot
-  PI_DOCKER_EGRESS_ALLOW_PRIVATE
+  RAPUNZEL_EGRESS_ALLOW_PRIVATE
                           Exact hosts for allowlist mode that resolve to private
                           addresses, such as a model router on the local network
-  PI_DOCKER_BASE_URL_VARIABLE
+  RAPUNZEL_BASE_URL_VARIABLE
                           Variable that receives the effective base URL of
-                          PI_DOCKER_API_BASE_URL, for extension providers
+                          RAPUNZEL_API_BASE_URL, for extension providers
 EOF
     exit "${1:-2}"
 }
@@ -74,64 +74,64 @@ if [[ $# -gt 0 ]]; then
     shift
 fi
 if [[ ! -d "$PROJECT_INPUT" ]]; then
-    printf 'pi-project: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
+    printf 'rapunzel: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
     if [[ "$PROJECT_INPUT" == -* ]]; then
-        printf 'pi-project: put the project directory before pi arguments, for example: pi-project . %s\n' \
+        printf 'rapunzel: put the project directory before pi arguments, for example: rapunzel . %s\n' \
             "$PROJECT_INPUT" >&2
     fi
     exit 1
 fi
 if [[ "$SHELL_MODE" == true && $# -gt 0 ]]; then
-    printf 'pi-project: --shell does not accept pi arguments\n' >&2
+    printf 'rapunzel: --shell does not accept pi arguments\n' >&2
     exit 2
 fi
 PROJECT_DIR=$(cd -- "$PROJECT_INPUT" && pwd -P)
 
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-$(project_volume_name "$PROJECT_DIR")}
-NETWORK=${PI_DOCKER_NETWORK:-bridge}
-EGRESS=${PI_DOCKER_EGRESS:-open}
-if [[ -n "${PI_DOCKER_EGRESS_ALLOW_PRIVATE:-}" && "$EGRESS" != allowlist ]]; then
-    printf 'pi-project: PI_DOCKER_EGRESS_ALLOW_PRIVATE needs PI_DOCKER_EGRESS=allowlist\n' >&2
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+VOLUME=${RAPUNZEL_VOLUME:-$(project_volume_name "$PROJECT_DIR")}
+NETWORK=${RAPUNZEL_NETWORK:-bridge}
+EGRESS=${RAPUNZEL_EGRESS:-open}
+if [[ -n "${RAPUNZEL_EGRESS_ALLOW_PRIVATE:-}" && "$EGRESS" != allowlist ]]; then
+    printf 'rapunzel: RAPUNZEL_EGRESS_ALLOW_PRIVATE needs RAPUNZEL_EGRESS=allowlist\n' >&2
     exit 2
 fi
-if [[ -n "${PI_DOCKER_EGRESS_LOGINS:-}" && "$EGRESS" != allowlist ]]; then
-    printf 'pi-project: PI_DOCKER_EGRESS_LOGINS needs PI_DOCKER_EGRESS=allowlist (strict mode cannot keep /login credentials out of the sandbox)\n' >&2
+if [[ -n "${RAPUNZEL_EGRESS_LOGINS:-}" && "$EGRESS" != allowlist ]]; then
+    printf 'rapunzel: RAPUNZEL_EGRESS_LOGINS needs RAPUNZEL_EGRESS=allowlist (strict mode cannot keep /login credentials out of the sandbox)\n' >&2
     exit 2
 fi
 case "$EGRESS" in
     open) ;;
     allowlist | strict)
-        if [[ -n "${PI_DOCKER_NETWORK:-}" ]]; then
-            printf 'pi-project: PI_DOCKER_NETWORK cannot be combined with PI_DOCKER_EGRESS=%s\n' "$EGRESS" >&2
+        if [[ -n "${RAPUNZEL_NETWORK:-}" ]]; then
+            printf 'rapunzel: RAPUNZEL_NETWORK cannot be combined with RAPUNZEL_EGRESS=%s\n' "$EGRESS" >&2
             exit 2
         fi
         ;;
     *)
-        printf 'pi-project: PI_DOCKER_EGRESS must be open, allowlist, or strict, got: %s\n' "$EGRESS" >&2
+        printf 'rapunzel: RAPUNZEL_EGRESS must be open, allowlist, or strict, got: %s\n' "$EGRESS" >&2
         exit 2
         ;;
 esac
 RUNTIME_UID=$(id -u)
 RUNTIME_GID=$(id -g)
 if [[ "$RUNTIME_UID" == 0 ]]; then
-    printf 'pi-project: refusing to run pi as root; invoke it as a non-root user\n' >&2
+    printf 'rapunzel: refusing to run pi as root; invoke it as a non-root user\n' >&2
     exit 1
 fi
 
-if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
-    if [[ ! -f "$PI_DOCKER_ENV_FILE" ]]; then
-        printf 'pi-project: env file does not exist: %s\n' "$PI_DOCKER_ENV_FILE" >&2
+if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
+    if [[ ! -f "$RAPUNZEL_ENV_FILE" ]]; then
+        printf 'rapunzel: env file does not exist: %s\n' "$RAPUNZEL_ENV_FILE" >&2
         exit 1
     fi
-    env_mode=$(stat -c '%a' "$PI_DOCKER_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$PI_DOCKER_ENV_FILE")
+    env_mode=$(stat -c '%a' "$RAPUNZEL_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$RAPUNZEL_ENV_FILE")
     if [[ "$env_mode" != "600" ]]; then
-        printf 'pi-project: warning: %s has mode %s; use chmod 600 for an env file containing secrets\n' \
-            "$PI_DOCKER_ENV_FILE" "$env_mode" >&2
+        printf 'rapunzel: warning: %s has mode %s; use chmod 600 for an env file containing secrets\n' \
+            "$RAPUNZEL_ENV_FILE" "$env_mode" >&2
     fi
 fi
 
-require_docker pi-project
+require_docker rapunzel
 
 filtered_env=""
 egress_dir=""
@@ -151,7 +151,7 @@ cleanup() {
     restore_terminal
     if [[ -n "$host_files_before" ]]; then
         local host_files_after
-        host_files_after=$(mktemp "${TMPDIR:-/tmp}/pi-project-files.XXXXXX")
+        host_files_after=$(mktemp "${TMPDIR:-/tmp}/rapunzel-files.XXXXXX")
         host_files_snapshot "$PROJECT_DIR" "$host_files_after"
         host_files_report "$host_files_before" "$host_files_after"
         rm -f "$host_files_before" "$host_files_after"
@@ -173,9 +173,9 @@ args=(
     --security-opt=no-new-privileges
     --cap-drop=ALL
     --mount "type=bind,src=${PROJECT_DIR},dst=/workspace"
-    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy"
-    --env HOME=/home/pi
-    --env PI_CODING_AGENT_DIR=/home/pi/.pi/agent
+    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy"
+    --env HOME=/home/agent
+    --env PI_CODING_AGENT_DIR=/home/agent/.pi/agent
 )
 # Git config and hooks stay read-only, so pi can commit but cannot plant
 # anything the host's git would run.
@@ -186,11 +186,11 @@ args+=(${HOST_FILE_MOUNTS[@]+"${HOST_FILE_MOUNTS[@]}"})
 # This stops a mistaken or untrusted env file from injecting loader/interpreter
 # hooks (LD_PRELOAD, BASH_ENV, NODE_OPTIONS) or overriding container paths.
 env_allowlist=(
-    PI_DOCKER_PROVIDER PI_DOCKER_MODEL PI_DOCKER_MODEL_ID PI_DOCKER_MODEL_NAME
-    PI_DOCKER_API_BASE_URL PI_DOCKER_BASE_URL PI_DOCKER_API PI_DOCKER_API_KEY
-    PI_DOCKER_API_KEY_VARIABLE PI_DOCKER_REASONING PI_DOCKER_CONTEXT_WINDOW
-    PI_DOCKER_MAX_TOKENS PI_DOCKER_COMPAT_JSON PI_DOCKER_HEADERS_JSON
-    PI_DOCKER_AUTH_HEADER
+    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
+    RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL RAPUNZEL_API RAPUNZEL_API_KEY
+    RAPUNZEL_API_KEY_VARIABLE RAPUNZEL_REASONING RAPUNZEL_CONTEXT_WINDOW
+    RAPUNZEL_MAX_TOKENS RAPUNZEL_COMPAT_JSON RAPUNZEL_HEADERS_JSON
+    RAPUNZEL_AUTH_HEADER
     ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GEMINI_API_KEY
     OPENROUTER_API_KEY XAI_API_KEY GROQ_API_KEY MISTRAL_API_KEY
     CEREBRAS_API_KEY NVIDIA_API_KEY TOGETHER_API_KEY FIREWORKS_API_KEY
@@ -204,9 +204,9 @@ env_allowlist=(
 # In strict mode the agent gets only non-secret provider settings; the
 # credentials and upstream URL go to the gateway instead.
 gateway_agent_allowlist=(
-    PI_DOCKER_PROVIDER PI_DOCKER_MODEL PI_DOCKER_MODEL_ID PI_DOCKER_MODEL_NAME
-    PI_DOCKER_API PI_DOCKER_REASONING PI_DOCKER_CONTEXT_WINDOW
-    PI_DOCKER_MAX_TOKENS PI_DOCKER_COMPAT_JSON PI_DOCKER_AUTH_HEADER
+    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
+    RAPUNZEL_API RAPUNZEL_REASONING RAPUNZEL_CONTEXT_WINDOW
+    RAPUNZEL_MAX_TOKENS RAPUNZEL_COMPAT_JSON RAPUNZEL_AUTH_HEADER
     PI_CACHE_RETENTION
 )
 env_denylist=(
@@ -236,36 +236,36 @@ env_name_is_allowed() {
 }
 
 # The custom API-key variable may be named in the host env or in the env file.
-key_variable=${PI_DOCKER_API_KEY_VARIABLE:-}
-if [[ -z "$key_variable" && -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
-    key_variable=$(grep -E '^PI_DOCKER_API_KEY_VARIABLE=' "$PI_DOCKER_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+key_variable=${RAPUNZEL_API_KEY_VARIABLE:-}
+if [[ -z "$key_variable" && -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
+    key_variable=$(grep -E '^RAPUNZEL_API_KEY_VARIABLE=' "$RAPUNZEL_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
     key_variable=${key_variable%$'\r'}
 fi
 if [[ -n "$key_variable" ]]; then
     if ! env_name_is_valid "$key_variable" || env_name_is_denied "$key_variable"; then
-        printf 'pi-project: PI_DOCKER_API_KEY_VARIABLE is not an allowed variable name: %s\n' "$key_variable" >&2
+        printf 'rapunzel: RAPUNZEL_API_KEY_VARIABLE is not an allowed variable name: %s\n' "$key_variable" >&2
         exit 2
     fi
     [[ "$EGRESS" == strict ]] || env_allowlist+=("$key_variable")
 fi
 
 # An extension provider (for example a model-router catalog) may read its
-# endpoint from a variable of its own; this names it. pi-project sets it to
-# PI_DOCKER_API_BASE_URL, or to the gateway route in strict mode.
-base_url_variable=${PI_DOCKER_BASE_URL_VARIABLE:-}
-if [[ -z "$base_url_variable" && -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
-    base_url_variable=$(grep -E '^PI_DOCKER_BASE_URL_VARIABLE=' "$PI_DOCKER_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+# endpoint from a variable of its own; this names it. rapunzel sets it to
+# RAPUNZEL_API_BASE_URL, or to the gateway route in strict mode.
+base_url_variable=${RAPUNZEL_BASE_URL_VARIABLE:-}
+if [[ -z "$base_url_variable" && -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
+    base_url_variable=$(grep -E '^RAPUNZEL_BASE_URL_VARIABLE=' "$RAPUNZEL_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
     base_url_variable=${base_url_variable%$'\r'}
 fi
 if [[ -n "$base_url_variable" ]] && { ! env_name_is_valid "$base_url_variable" || env_name_is_denied "$base_url_variable"; }; then
-    printf 'pi-project: PI_DOCKER_BASE_URL_VARIABLE is not an allowed variable name: %s\n' "$base_url_variable" >&2
+    printf 'rapunzel: RAPUNZEL_BASE_URL_VARIABLE is not an allowed variable name: %s\n' "$base_url_variable" >&2
     exit 2
 fi
 
 # Names the strict gateway reads; they are expected in the env and never reach pi.
 gateway_consumed=(
-    ANTHROPIC_API_KEY OPENAI_API_KEY PI_DOCKER_API_BASE_URL PI_DOCKER_BASE_URL
-    PI_DOCKER_API_KEY_VARIABLE "${key_variable:-PI_DOCKER_API_KEY}"
+    ANTHROPIC_API_KEY OPENAI_API_KEY RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL
+    RAPUNZEL_API_KEY_VARIABLE "${key_variable:-RAPUNZEL_API_KEY}"
     PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY
 )
 name_in_list() {
@@ -281,8 +281,8 @@ runtime_value() {
     local name=$1 value
     if [[ -n "${!name+x}" ]]; then
         printf '%s' "${!name}"
-    elif [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
-        value=$(grep -E "^${name}=" "$PI_DOCKER_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
+    elif [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
+        value=$(grep -E "^${name}=" "$RAPUNZEL_ENV_FILE" | tail -n1 | cut -d= -f2- || true)
         printf '%s' "${value%$'\r'}"
     fi
 }
@@ -303,20 +303,20 @@ if [[ "$EGRESS" == strict ]]; then
         fi
     done
     if [[ ${#unsupported[@]} -gt 0 ]]; then
-        printf 'pi-project: warning: not passed with PI_DOCKER_EGRESS=strict: %s\n' "${unsupported[*]}" >&2
+        printf 'rapunzel: warning: not passed with RAPUNZEL_EGRESS=strict: %s\n' "${unsupported[*]}" >&2
     fi
     env_allowlist=("${gateway_agent_allowlist[@]}")
 fi
 
-if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
-    filtered_env=$(mktemp "${TMPDIR:-/tmp}/pi-project-env.XXXXXX")
+if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
+    filtered_env=$(mktemp "${TMPDIR:-/tmp}/rapunzel-env.XXXXXX")
     chmod 600 "$filtered_env"
     dropped=()
     while IFS= read -r line || [[ -n "$line" ]]; do
         line=${line%$'\r'}
         [[ -z "$line" || "$line" == \#* ]] && continue
         if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-            printf 'pi-project: ignoring malformed env-file line: %s\n' "$line" >&2
+            printf 'rapunzel: ignoring malformed env-file line: %s\n' "$line" >&2
             continue
         fi
         name=${BASH_REMATCH[1]}
@@ -325,14 +325,14 @@ if [[ -n "${PI_DOCKER_ENV_FILE:-}" ]]; then
             printf '%s=%s\n' "$name" "$value" >>"$filtered_env"
         elif [[ "$EGRESS" == strict ]] && name_in_list "$name" "${gateway_consumed[@]}"; then
             continue
-        elif [[ "$name" == PI_DOCKER_BASE_URL_VARIABLE ]]; then
+        elif [[ "$name" == RAPUNZEL_BASE_URL_VARIABLE ]]; then
             continue
         else
             dropped+=("$name")
         fi
-    done <"$PI_DOCKER_ENV_FILE"
+    done <"$RAPUNZEL_ENV_FILE"
     if [[ ${#dropped[@]} -gt 0 ]]; then
-        printf 'pi-project: warning: dropped %d env-file variable(s) not on the allowlist: %s\n' \
+        printf 'rapunzel: warning: dropped %d env-file variable(s) not on the allowlist: %s\n' \
             "${#dropped[@]}" "${dropped[*]}" >&2
     fi
     args+=(--env-file "$filtered_env")
@@ -344,16 +344,16 @@ for name in "${env_allowlist[@]}"; do
     fi
 done
 
-custom_url=$(runtime_value PI_DOCKER_API_BASE_URL)
-[[ -n "$custom_url" ]] || custom_url=$(runtime_value PI_DOCKER_BASE_URL)
+custom_url=$(runtime_value RAPUNZEL_API_BASE_URL)
+[[ -n "$custom_url" ]] || custom_url=$(runtime_value RAPUNZEL_BASE_URL)
 if [[ -n "$base_url_variable" && -z "$custom_url" ]]; then
-    printf 'pi-project: PI_DOCKER_BASE_URL_VARIABLE needs PI_DOCKER_API_BASE_URL\n' >&2
+    printf 'rapunzel: RAPUNZEL_BASE_URL_VARIABLE needs RAPUNZEL_API_BASE_URL\n' >&2
     exit 2
 fi
 base_url_value=$custom_url
 
 if [[ "$EGRESS" != open ]]; then
-    egress_dir=$(mktemp -d "${TMPDIR:-/tmp}/pi-project-egress.XXXXXX")
+    egress_dir=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-egress.XXXXXX")
     egress_networks_create
     if [[ "$EGRESS" == allowlist ]]; then
         [[ -z "$(runtime_value ANTHROPIC_API_KEY)" ]] || egress_allow_host api.anthropic.com
@@ -363,21 +363,21 @@ if [[ "$EGRESS" != open ]]; then
             egress_allow_host "$custom_host"
         fi
         # read -a splits without glob expansion, so *.example.com stays literal.
-        IFS=$', \t' read -r -a logins <<<"${PI_DOCKER_EGRESS_LOGINS:-}"
+        IFS=$', \t' read -r -a logins <<<"${RAPUNZEL_EGRESS_LOGINS:-}"
         for login in ${logins[@]+"${logins[@]}"}; do
             egress_allow_login "$login"
         done
-        IFS=$', \t' read -r -a extra_hosts <<<"${PI_DOCKER_EGRESS_ALLOW:-}"
+        IFS=$', \t' read -r -a extra_hosts <<<"${RAPUNZEL_EGRESS_ALLOW:-}"
         for host in ${extra_hosts[@]+"${extra_hosts[@]}"}; do
             egress_allow_host "$host"
         done
-        IFS=$', \t' read -r -a private_hosts <<<"${PI_DOCKER_EGRESS_ALLOW_PRIVATE:-}"
+        IFS=$', \t' read -r -a private_hosts <<<"${RAPUNZEL_EGRESS_ALLOW_PRIVATE:-}"
         for host in ${private_hosts[@]+"${private_hosts[@]}"}; do
             egress_allow_private_host "$host"
         done
         allowlist_configure "$egress_dir"
         allowlist_start "$egress_dir"
-        printf 'pi-project: egress allowed to %s\n' "${EGRESS_HOSTS[*]}" >&2
+        printf 'rapunzel: egress allowed to %s\n' "${EGRESS_HOSTS[*]}" >&2
         # No HTTP_PROXY: plain http:// requests have no route and fail closed.
         args+=(
             --env "HTTPS_PROXY=${EGRESS_PROXY_URL}"
@@ -388,23 +388,23 @@ if [[ "$EGRESS" != open ]]; then
         GW_ANTHROPIC_KEY=$(runtime_value ANTHROPIC_API_KEY)
         GW_OPENAI_KEY=$(runtime_value OPENAI_API_KEY)
         GW_CUSTOM_URL=$custom_url
-        GW_CUSTOM_KEY=$(runtime_value "${key_variable:-PI_DOCKER_API_KEY}")
-        GW_CUSTOM_API=$(runtime_value PI_DOCKER_API)
+        GW_CUSTOM_KEY=$(runtime_value "${key_variable:-RAPUNZEL_API_KEY}")
+        GW_CUSTOM_API=$(runtime_value RAPUNZEL_API)
         gateway_configure "$egress_dir"
         gateway_start "$egress_dir"
         args+=(
-            --env "PI_DOCKER_GATEWAY_URL=${GATEWAY_URL}"
-            --env "PI_DOCKER_GATEWAY_PROVIDERS=${GATEWAY_PROVIDERS}"
+            --env "RAPUNZEL_GATEWAY_URL=${GATEWAY_URL}"
+            --env "RAPUNZEL_GATEWAY_PROVIDERS=${GATEWAY_PROVIDERS}"
         )
         if [[ "$GATEWAY_CUSTOM" == true ]]; then
             args+=(
-                --env "PI_DOCKER_API_BASE_URL=${GATEWAY_URL}/custom"
-                --env PI_DOCKER_API_KEY_VARIABLE=PI_DOCKER_API_KEY
-                --env "PI_DOCKER_API_KEY=${GATEWAY_DUMMY_KEY}"
+                --env "RAPUNZEL_API_BASE_URL=${GATEWAY_URL}/custom"
+                --env RAPUNZEL_API_KEY_VARIABLE=RAPUNZEL_API_KEY
+                --env "RAPUNZEL_API_KEY=${GATEWAY_DUMMY_KEY}"
             )
             # An extension provider reading the named key variable gets the
             # placeholder too; the gateway replaces it upstream.
-            if [[ -n "$key_variable" && "$key_variable" != PI_DOCKER_API_KEY ]]; then
+            if [[ -n "$key_variable" && "$key_variable" != RAPUNZEL_API_KEY ]]; then
                 args+=(--env "${key_variable}=${GATEWAY_DUMMY_KEY}")
             fi
             base_url_value="${GATEWAY_URL}/custom"
@@ -420,7 +420,7 @@ fi
 args+=(--network "$NETWORK")
 
 # Changes to host-executed files are reported when pi exits.
-host_files_before=$(mktemp "${TMPDIR:-/tmp}/pi-project-files.XXXXXX")
+host_files_before=$(mktemp "${TMPDIR:-/tmp}/rapunzel-files.XXXXXX")
 host_files_snapshot "$PROJECT_DIR" "$host_files_before"
 
 if [[ -t 0 && -t 1 ]]; then
@@ -430,10 +430,10 @@ fi
 
 if [[ "$SHELL_MODE" == true ]]; then
     if [[ ! -t 0 || ! -t 1 ]]; then
-        printf 'pi-project: --shell requires an interactive terminal (TTY)\n' >&2
+        printf 'rapunzel: --shell requires an interactive terminal (TTY)\n' >&2
         exit 2
     fi
-    args+=(--entrypoint /usr/local/bin/pi-docker-shell)
+    args+=(--entrypoint /usr/local/bin/rapunzel-shell)
     docker "${args[@]}" "$IMAGE"
     exit
 fi

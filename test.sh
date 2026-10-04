@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # Verifies that the entrypoint bootstraps the agent volume and that pi runs.
 #
 # Build the image first:
-#   docker build -t pi-project-sandbox .
+#   docker build -t rapunzel .
 # Then run:
 #   ./test.sh
 
@@ -15,8 +15,8 @@ source "${SCRIPT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${SCRIPT_DIR}/lib/docker.sh"
 
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-pi-project-test}
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+VOLUME=${RAPUNZEL_VOLUME:-rapunzel-test}
 
 [[ "$(id -u)" != 0 ]] || {
     printf 'Refusing to run tests as root; invoke as a non-root user.\n' >&2
@@ -37,7 +37,7 @@ run() {
         --network none \
         --cap-drop=ALL \
         --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
         "$IMAGE" \
         "$@"
 }
@@ -51,15 +51,15 @@ version=$(run pi --version)
 printf 'pi version: %s\n' "$version"
 
 identity=$(run id -un)
-[[ "$identity" == "pi" ]] || {
-    printf 'expected container user name "pi", got %s\n' "$identity" >&2
+[[ "$identity" == "agent" ]] || {
+    printf 'expected container user name "agent", got %s\n' "$identity" >&2
     exit 1
 }
 printf 'identity: %s (%s)\n' "$identity" "$(run id -gn)"
 
-run node -e 'JSON.parse(require("fs").readFileSync("/home/pi/.pi/agent/settings.json","utf8"))'
-run test -s /home/pi/.pi/agent/settings.json
-run test -s /home/pi/.pi/agent/models.json
+run node -e 'JSON.parse(require("fs").readFileSync("/home/agent/.pi/agent/settings.json","utf8"))'
+run test -s /home/agent/.pi/agent/settings.json
+run test -s /home/agent/.pi/agent/models.json
 
 # HOME must be writable by the caller's UID, not only the image's UID 1001.
 run bash -c 'touch "$HOME/.probe" && git config --global user.name probe'

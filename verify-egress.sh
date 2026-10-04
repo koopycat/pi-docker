@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Checks PI_DOCKER_EGRESS=allowlist and PI_DOCKER_EGRESS=strict through the
-# real launcher: pi-project --exec runs lib/egress-probe.mjs inside the agent
+# Checks RAPUNZEL_EGRESS=allowlist and RAPUNZEL_EGRESS=strict through the
+# real launcher: rapunzel --exec runs lib/egress-probe.mjs inside the agent
 # container. A canary on the host network must stay unreachable in both modes.
 #
 # allowlist needs internet access: it opens real tunnels to api.openai.com
 #   (allowed through OPENAI_API_KEY) and chatgpt.com (allowed through
-#   PI_DOCKER_EGRESS_LOGINS=openai-codex). Both are Cloudflare-hosted names,
+#   RAPUNZEL_EGRESS_LOGINS=openai-codex). Both are Cloudflare-hosted names,
 #   which also exercises SNI-mismatch refusal.
 # strict needs none: an echo server stands in for the provider.
 #
@@ -23,8 +23,8 @@ done
 ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/docker.sh
 source "${ROOT_DIR}/lib/docker.sh"
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-VOLUME=${PI_DOCKER_VOLUME:-pi-project-egress-check}
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+VOLUME=${RAPUNZEL_VOLUME:-rapunzel-egress-check}
 MODES=("$@")
 [[ ${#MODES[@]} -gt 0 ]] || MODES=(allowlist strict)
 
@@ -35,10 +35,10 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 }
 
 random_token() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
-upstream="pi-docker-egress-upstream-$$"
-canary="pi-docker-egress-canary-$$"
+upstream="rapunzel-egress-upstream-$$"
+canary="rapunzel-egress-canary-$$"
 canary_port=$((20000 + RANDOM % 20000))
-project=$(mktemp -d "${TMPDIR:-/tmp}/pi-egress-project.XXXXXX")
+project=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-egress-project.XXXXXX")
 cleanup() {
     docker rm --force "$upstream" "$canary" >/dev/null 2>&1 || true
     rm -rf "$project"
@@ -46,8 +46,8 @@ cleanup() {
 trap cleanup EXIT
 
 egress_resources() {
-    docker ps --all --quiet --filter label=pi-docker.egress=1 | wc -l | tr -d ' '
-    docker network ls --quiet --filter label=pi-docker.egress=1 | wc -l | tr -d ' '
+    docker ps --all --quiet --filter label=rapunzel.egress=1 | wc -l | tr -d ' '
+    docker network ls --quiet --filter label=rapunzel.egress=1 | wc -l | tr -d ' '
 }
 before=$(egress_resources)
 
@@ -70,16 +70,16 @@ fail() {
     failures=$((failures + 1))
 }
 
-# Run the probe through pi-project with the given environment assignments.
+# Run the probe through rapunzel with the given environment assignments.
 probe() {
-    env -u PI_DOCKER_ENV_FILE -u PI_DOCKER_NETWORK -u PI_DOCKER_API_KEY_VARIABLE \
-        -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u PI_DOCKER_API_BASE_URL -u PI_DOCKER_BASE_URL \
-        -u PI_DOCKER_EGRESS_ALLOW -u PI_DOCKER_EGRESS_LOGINS -u PI_DOCKER_EGRESS_ALLOW_PRIVATE \
-        -u PI_DOCKER_BASE_URL_VARIABLE \
-        PI_DOCKER_IMAGE="$IMAGE" \
-        PI_DOCKER_VOLUME="$VOLUME" \
+    env -u RAPUNZEL_ENV_FILE -u RAPUNZEL_NETWORK -u RAPUNZEL_API_KEY_VARIABLE \
+        -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u RAPUNZEL_API_BASE_URL -u RAPUNZEL_BASE_URL \
+        -u RAPUNZEL_EGRESS_ALLOW -u RAPUNZEL_EGRESS_LOGINS -u RAPUNZEL_EGRESS_ALLOW_PRIVATE \
+        -u RAPUNZEL_BASE_URL_VARIABLE \
+        RAPUNZEL_IMAGE="$IMAGE" \
+        RAPUNZEL_VOLUME="$VOLUME" \
         "$@" \
-        "${ROOT_DIR}/pi-project" --exec "$project" \
+        "${ROOT_DIR}/rapunzel" --exec "$project" \
         node --input-type=module -e "$(<"${ROOT_DIR}/lib/egress-probe.mjs")" "${probe_args[@]}"
 }
 
@@ -100,7 +100,7 @@ check_allowlist() {
     local key output env_line
     key="sk-dummy-$(random_token)"
     probe_args=(allowlist "$canary_port" api.openai.com)
-    output=$(probe PI_DOCKER_EGRESS=allowlist OPENAI_API_KEY="$key")
+    output=$(probe RAPUNZEL_EGRESS=allowlist OPENAI_API_KEY="$key")
     expect_checks "$output" 19
     env_line=$(section "$output" ENV)
     # In this mode the agent holds the key by design.
@@ -108,10 +108,10 @@ check_allowlist() {
     [[ "$env_line" == *'"HTTPS_PROXY":"http://egress:8888"'* ]] || fail "HTTPS_PROXY is not set to the egress proxy"
     [[ "$env_line" != *'"HTTP_PROXY"'* ]] || fail "HTTP_PROXY is set; plain http:// should have no route"
 
-    # A /login provider: the hosts come from PI_DOCKER_EGRESS_LOGINS alone.
+    # A /login provider: the hosts come from RAPUNZEL_EGRESS_LOGINS alone.
     printf '== allowlist with a /login provider (openai-codex)\n'
     probe_args=(allowlist "$canary_port" chatgpt.com)
-    output=$(probe PI_DOCKER_EGRESS=allowlist PI_DOCKER_EGRESS_LOGINS=openai-codex)
+    output=$(probe RAPUNZEL_EGRESS=allowlist RAPUNZEL_EGRESS_LOGINS=openai-codex)
     expect_checks "$output" 19
 
     check_private_host
@@ -129,7 +129,7 @@ check_private_host() {
         --security-opt=no-new-privileges \
         --entrypoint bash \
         "$IMAGE" \
-        -c 'cd /tmp && openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=pi-docker-test \
+        -c 'cd /tmp && openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=rapunzel-test \
                 -keyout key.pem -out cert.pem 2>/dev/null &&
             exec node -e "require(\"node:https\").createServer({ key: require(\"node:fs\").readFileSync(\"key.pem\"),
                 cert: require(\"node:fs\").readFileSync(\"cert.pem\") }, (req, res) => res.end(\"private ok\")).listen(8443)"' \
@@ -139,14 +139,14 @@ check_private_host() {
     name="${bridge_gateway}.nip.io"
     sleep 1
 
-    printf '== allowlist with a private host in PI_DOCKER_EGRESS_ALLOW (%s)\n' "$name"
+    printf '== allowlist with a private host in RAPUNZEL_EGRESS_ALLOW (%s)\n' "$name"
     probe_args=(allowlist "$canary_port" api.openai.com "${name}:${port}" refused)
-    output=$(probe PI_DOCKER_EGRESS=allowlist OPENAI_API_KEY=sk-dummy PI_DOCKER_EGRESS_ALLOW="$name")
+    output=$(probe RAPUNZEL_EGRESS=allowlist OPENAI_API_KEY=sk-dummy RAPUNZEL_EGRESS_ALLOW="$name")
     expect_checks "$output" 20
 
-    printf '== allowlist with PI_DOCKER_EGRESS_ALLOW_PRIVATE (%s)\n' "$name"
+    printf '== allowlist with RAPUNZEL_EGRESS_ALLOW_PRIVATE (%s)\n' "$name"
     probe_args=(allowlist "$canary_port" api.openai.com "${name}:${port}" reachable)
-    output=$(probe PI_DOCKER_EGRESS=allowlist OPENAI_API_KEY=sk-dummy PI_DOCKER_EGRESS_ALLOW_PRIVATE="$name")
+    output=$(probe RAPUNZEL_EGRESS=allowlist OPENAI_API_KEY=sk-dummy RAPUNZEL_EGRESS_ALLOW_PRIVATE="$name")
     expect_checks "$output" 20
     docker rm --force "$upstream" >/dev/null 2>&1 || true
 }
@@ -184,14 +184,14 @@ check_strict() {
     }
 
     probe_args=(strict "$bridge_gateway" "$port" "$canary_port")
-    output=$(probe PI_DOCKER_EGRESS=strict \
-        PI_DOCKER_PROVIDER=echo \
-        PI_DOCKER_MODEL=echo-model \
-        PI_DOCKER_API=openai-completions \
-        PI_DOCKER_API_BASE_URL="http://${bridge_gateway}:${port}/v1" \
-        PI_DOCKER_API_KEY_VARIABLE=EXAMPLE_API_KEY \
+    output=$(probe RAPUNZEL_EGRESS=strict \
+        RAPUNZEL_PROVIDER=echo \
+        RAPUNZEL_MODEL=echo-model \
+        RAPUNZEL_API=openai-completions \
+        RAPUNZEL_API_BASE_URL="http://${bridge_gateway}:${port}/v1" \
+        RAPUNZEL_API_KEY_VARIABLE=EXAMPLE_API_KEY \
         EXAMPLE_API_KEY="$secret" \
-        PI_DOCKER_BASE_URL_VARIABLE=EXAMPLE_BASE_URL \
+        RAPUNZEL_BASE_URL_VARIABLE=EXAMPLE_BASE_URL \
         ANTHROPIC_API_KEY="$anthropic_secret")
     expect_checks "$output" 11
 
@@ -210,9 +210,9 @@ check_strict() {
     # An extension provider reading its own variables gets the gateway route
     # and the placeholder key.
     [[ "$env_line" == *'"EXAMPLE_BASE_URL":"http://llm-proxy:8080/custom"'* ]] ||
-        fail "PI_DOCKER_BASE_URL_VARIABLE does not point at the gateway"
-    [[ "$env_line" == *'"EXAMPLE_API_KEY":"pi-docker-gateway"'* ]] ||
-        fail "PI_DOCKER_API_KEY_VARIABLE does not hold the placeholder"
+        fail "RAPUNZEL_BASE_URL_VARIABLE does not point at the gateway"
+    [[ "$env_line" == *'"EXAMPLE_API_KEY":"rapunzel-gateway"'* ]] ||
+        fail "RAPUNZEL_API_KEY_VARIABLE does not hold the placeholder"
     [[ "$echo_line" == *"\"authorization\":\"Bearer ${secret}\""* ]] ||
         fail "the gateway did not replace the agent's Authorization header with the real key"
     [[ "$echo_line" == *'"xApiKey":null'* ]] || fail "the gateway forwarded the agent's x-api-key header"

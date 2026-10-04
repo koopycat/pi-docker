@@ -14,17 +14,17 @@ source "${SCRIPT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${SCRIPT_DIR}/lib/docker.sh"
 
-IMAGE=${PI_DOCKER_IMAGE:-pi-project-sandbox}
-SOURCE=${PI_EXTENSIONS_DIR:-${HOME}/.pi-extensions}
+IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+SOURCE=${RAPUNZEL_EXTENSIONS_DIR:-${HOME}/.pi-extensions}
 
 usage() {
     cat >&2 <<'EOF'
-Usage: pi-ext sync [PROJECT_DIR] | pi-ext list [PROJECT_DIR]
+Usage: rapunzel-ext sync [PROJECT_DIR] | rapunzel-ext list [PROJECT_DIR]
 
-The curated source is ~/.pi-extensions by default. Set PI_EXTENSIONS_DIR to
-use another source directory, or PI_DOCKER_VOLUME to select a volume directly.
+The curated source is ~/.pi-extensions by default. Set RAPUNZEL_EXTENSIONS_DIR
+to use another source directory, or RAPUNZEL_VOLUME to select a volume directly.
 PROJECT_DIR defaults to the current directory. The default volume is the same
-per-project volume used by pi-project.
+per-project volume used by rapunzel.
 EOF
     exit 2
 }
@@ -35,21 +35,21 @@ shift
 [[ "$COMMAND" == sync || "$COMMAND" == list ]] || usage
 [[ $# -le 1 ]] || usage
 
-if [[ -n "${PI_DOCKER_VOLUME:-}" ]]; then
-    VOLUME=$PI_DOCKER_VOLUME
+if [[ -n "${RAPUNZEL_VOLUME:-}" ]]; then
+    VOLUME=$RAPUNZEL_VOLUME
     if [[ $# -gt 0 ]]; then
-        printf 'pi-ext: ignoring project directory %s because PI_DOCKER_VOLUME is set\n' "$1" >&2
+        printf 'rapunzel-ext: ignoring project directory %s because RAPUNZEL_VOLUME is set\n' "$1" >&2
     fi
 else
     PROJECT_INPUT=${1:-.}
     PROJECT_DIR=$(cd -- "$PROJECT_INPUT" 2>/dev/null && pwd -P) || {
-        printf 'pi-ext: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
+        printf 'rapunzel-ext: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
         exit 1
     }
     VOLUME=$(project_volume_name "$PROJECT_DIR")
 fi
 
-require_docker pi-ext
+require_docker rapunzel-ext
 
 if [[ "$COMMAND" == list ]]; then
     printf 'Volume: %s\n' "$VOLUME"
@@ -66,10 +66,10 @@ if [[ "$COMMAND" == list ]]; then
         exit 0
     fi
     docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy,readonly" \
+        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy,readonly" \
         --entrypoint /bin/bash "$IMAGE" \
         -euo pipefail -c '
-            directory=/home/pi/.pi/agent/extensions
+            directory=/home/agent/.pi/agent/extensions
             if [[ -d "$directory" ]]; then
                 find "$directory" -mindepth 1 -maxdepth 1 -printf "%f\\n" | sort
             fi
@@ -78,10 +78,10 @@ if [[ "$COMMAND" == list ]]; then
 fi
 
 [[ -d "$SOURCE" ]] || {
-    printf 'pi-ext: curated source directory does not exist: %s\n' "$SOURCE" >&2
+    printf 'rapunzel-ext: curated source directory does not exist: %s\n' "$SOURCE" >&2
     exit 1
 }
-staging=$(mktemp -d "${SCRIPT_DIR}/.pi-ext.XXXXXX")
+staging=$(mktemp -d "${SCRIPT_DIR}/.rapunzel-ext.XXXXXX")
 cleanup() { rm -rf "$staging"; }
 trap cleanup EXIT
 while IFS= read -r -d '' entry; do
@@ -95,12 +95,12 @@ prepare_volume_owner
 
 docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
     --mount "type=bind,src=${staging},dst=/source,readonly" \
-    --mount "type=volume,src=${VOLUME},dst=/home/pi/.pi/agent,volume-nocopy" \
+    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
     --entrypoint /bin/bash "$IMAGE" \
     -euo pipefail -c '
-        destination=/home/pi/.pi/agent/extensions
+        destination=/home/agent/.pi/agent/extensions
         mkdir -p "$destination"
         cp -R --remove-destination --preserve=mode,timestamps /source/. "$destination/"
     '
-printf 'Synced %s into %s (/home/pi/.pi/agent/extensions). Run /reload in pi to hot-reload.\n' \
+printf 'Synced %s into %s (/home/agent/.pi/agent/extensions). Run /reload in pi to hot-reload.\n' \
     "$SOURCE" "$VOLUME"
