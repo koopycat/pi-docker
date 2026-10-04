@@ -32,6 +32,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so the harness-change check can diff against the base.
+          fetch-depth: 0
 
       - name: Lint shell scripts
         run: |
@@ -51,11 +54,11 @@ jobs:
             verify-host-files.sh \
             verify-isolation-inner.sh \
             verify-isolation.sh \
-            profiles/pi/profile.sh
+            profiles/*/profile.sh
 
       - name: Validate Node scripts
         run: |
-          node --check profiles/pi/bootstrap.mjs
+          for f in profiles/*/bootstrap.mjs; do node --check "$f"; done
           node --check lib/egress-probe.mjs
           node --check lib/prune-foreign-platforms.mjs
 
@@ -64,6 +67,32 @@ jobs:
 
       - name: Offline smoke test
         run: ./test.sh
+
+      # The other harness images are not published, so they are built and
+      # smoke-tested only when something that goes into them changed.
+      - name: Detect harness image changes
+        id: harness
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            changed=true
+          elif git diff --name-only "$BASE" HEAD |
+              grep -qE '^(Dockerfile|\.dockerignore|bootstrap\.sh|rapunzel-shell|setup-identity\.sh|verify-isolation-inner\.sh|test\.sh|lib/profile\.sh|lib/volumes\.sh|profiles/)'; then
+            changed=true
+          else
+            changed=false
+          fi
+          echo "changed=$changed" >>"$GITHUB_OUTPUT"
+          echo "Harness images changed: $changed"
+
+      - name: Build and smoke-test the other harness images
+        if: steps.harness.outputs.changed == 'true'
+        run: |
+          for harness in claude codex dsh; do
+            docker build --target "$harness" -t "rapunzel:$harness" .
+            RAPUNZEL_HARNESS="$harness" ./test.sh
+          done
 
       - name: Isolation check
         run: ./verify-isolation.sh .

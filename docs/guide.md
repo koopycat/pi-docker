@@ -399,11 +399,11 @@ Rebuild with a deliberate version change:
 docker build --pull --build-arg PI_VERSION=1.0.1 -t rapunzel .
 ```
 
-The other harnesses pin their versions the same way, with `CLAUDE_VERSION` and `CODEX_VERSION`:
+The other harnesses pin their versions the same way, with `CLAUDE_VERSION`, `CODEX_VERSION`, and `DSH_VERSION` (see the `ARG` lines in the `Dockerfile` for the current pins; Renovate proposes updates weekly):
 
 ```bash
-docker build --pull --target claude --build-arg CLAUDE_VERSION=2.1.289 -t rapunzel:claude .
-docker build --pull --target codex --build-arg CODEX_VERSION=0.160.0 -t rapunzel:codex .
+docker build --pull --target claude --build-arg CLAUDE_VERSION=<version> -t rapunzel:claude .
+docker build --pull --target codex --build-arg CODEX_VERSION=<version> -t rapunzel:codex .
 ```
 
 Their auto-updaters cannot write the root-owned install (Codex's update check is off, and Claude Code's updater is off in the restricted egress modes), so update by rebuilding.

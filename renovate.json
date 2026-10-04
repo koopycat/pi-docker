@@ -18,6 +18,15 @@
       "datasourceTemplate": "npm"
     },
     {
+      "description": "Harness CLI versions in the Dockerfile, read from each stage's adjacent _PACKAGE and _VERSION args (pi has its own manager)",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Dockerfile$/"],
+      "matchStrings": [
+        "ARG (?:CLAUDE|CODEX|DSH)_PACKAGE=(?<depName>\\S+)\\nARG (?:CLAUDE|CODEX|DSH)_VERSION=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "npm"
+    },
+    {
       "description": "Egress sidecar images in lib/egress.sh, pinned by digest",
       "customType": "regex",
       "managerFilePatterns": ["/^lib/egress\\.sh$/"],
@@ -49,6 +58,20 @@
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "platformAutomerge": false
+    },
+    {
+      "description": "Claude Code, Codex, and dsh release several times a week, and CI smoke-tests their images only when the Dockerfile changes: one weekly PR, reviewed by hand",
+      "matchDepNames": ["@anthropic-ai/claude-code", "@openai/codex", "@deepseek-ai/dsh"],
+      "groupName": "harness CLIs",
+      "semanticCommitType": "feat",
+      "semanticCommitScope": "harnesses",
+      "automerge": false,
+      "schedule": ["* 0-5 * * 1"]
+    },
+    {
+      "description": "dsh is a developer preview published as prereleases; follow its latest tag",
+      "matchDepNames": ["@deepseek-ai/dsh"],
+      "followTag": "latest"
     },
     {
       "description": "Pinned action SHAs: one weekly PR",
