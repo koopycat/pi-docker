@@ -61,6 +61,19 @@ run node -e 'JSON.parse(require("fs").readFileSync("/home/agent/.pi/agent/settin
 run test -s /home/agent/.pi/agent/settings.json
 run test -s /home/agent/.pi/agent/models.json
 
+# Sessions must stay in the volume: pi resolves a relative sessionDir from
+# /workspace, the mounted project. Plant the old relative value first.
+run node -e '
+    const fs = require("fs"), f = "/home/agent/.pi/agent/settings.json";
+    const s = JSON.parse(fs.readFileSync(f, "utf8")); s.sessionDir = "sessions";
+    fs.writeFileSync(f, JSON.stringify(s));
+'
+session_dir=$(run node -p 'require("/home/agent/.pi/agent/settings.json").sessionDir')
+[[ "$session_dir" == /home/agent/.pi/agent/sessions ]] || {
+    printf 'sessionDir is %s, expected the agent volume\n' "$session_dir" >&2
+    exit 1
+}
+
 # HOME must be writable by the caller's UID, not only the image's UID 1001.
 run bash -c 'touch "$HOME/.probe" && git config --global user.name probe'
 

@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile, chmod } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 const configDir = process.argv[2];
 if (!configDir) throw new Error("configuration directory is required");
@@ -143,6 +143,11 @@ if (providerConfigured) {
 settings.defaultProjectTrust ??= "ask";
 settings.enableAnalytics ??= false;
 settings.quietStartup ??= false;
-settings.sessionDir ??= "sessions";
+// pi resolves a relative sessionDir from the working directory, which is the
+// mounted project, so sessions would land on the host. Keep them in the agent
+// volume, and repair the relative "sessions" older versions wrote.
+if (!settings.sessionDir || !isAbsolute(settings.sessionDir)) {
+  settings.sessionDir = join(configDir, "sessions");
+}
 await writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
 await chmod(settingsPath, 0o600);
