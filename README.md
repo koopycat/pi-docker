@@ -2,7 +2,7 @@
 
 rapunzel runs coding-agent harnesses against a project inside a hardened Docker sandbox. The agent sees one host directory, the project mounted at `/workspace`, and keeps its settings, logins, sessions, and extensions in a separate Docker volume per project. It runs without root, receives only an allowlist of environment variables, and can be limited to named hosts or kept away from your provider keys entirely.
 
-The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`), and [DeepSeek Harness](#deepseek-harness) (`--harness dsh`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`); they support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
+The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`), and [DeepSeek Harness](#deepseek-harness) (`--harness dsh`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`), and each has a shortcut, `rapunzel-claude`, `rapunzel-codex`, and `rapunzel-dsh`, that also loads `~/.config/rapunzel/<harness>.env` when it exists; they support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
 
 The name: Rapunzel is kept in a tower whose only way out is a single strand you control. Here the tower is the container, and the strand is the one project directory and, optionally, the one egress proxy.
 
@@ -59,7 +59,7 @@ To reuse your host's Claude subscription instead of logging in again inside ever
 claude setup-token                     # on the host; prints a token
 printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' '<token>' >> ~/.config/rapunzel/claude.env
 chmod 600 ~/.config/rapunzel/claude.env
-RAPUNZEL_ENV_FILE=~/.config/rapunzel/claude.env ./rapunzel --harness claude .
+./rapunzel-claude .                    # loads ~/.config/rapunzel/claude.env
 ```
 
 The token enters the container as an environment variable and is never written to the volume, and no refresh token from your host login is copied, so host and sandbox sessions do not invalidate each other. Revoke it from your Claude account settings when you no longer need it. With a token or `ANTHROPIC_API_KEY` set, the entrypoint marks first-run onboarding as done so Claude Code skips the login picker.

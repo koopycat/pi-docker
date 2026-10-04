@@ -7,7 +7,7 @@ pi is the default harness; Claude Code, Codex CLI, and DeepSeek Harness (dsh) ar
 - `docker build -t rapunzel .`
 - `./rapunzel [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
 - `./rapunzel --shell [PROJECT_DIR]`
-- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`, `dsh`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
+- `./rapunzel-NAME ...` (links for claude, codex, dsh) or `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`, `dsh`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
 - `./rapunzel-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`

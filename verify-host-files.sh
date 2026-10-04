@@ -63,7 +63,9 @@ printf "echo hi\n" > .envrc
 printf "* filter=evil\n" > .git/info/attributes
 '
 output=$(
-    env -u RAPUNZEL_ENV_FILE -u RAPUNZEL_EGRESS \
+    # An empty RAPUNZEL_ENV_FILE also keeps the launcher's default env file out.
+    env -u RAPUNZEL_EGRESS -u RAPUNZEL_HARNESS \
+        RAPUNZEL_ENV_FILE= \
         RAPUNZEL_IMAGE="$IMAGE" \
         RAPUNZEL_VOLUME="$VOLUME" \
         "${ROOT_DIR}/rapunzel" --exec "$project" bash -c "$attempts" 2>"$report"

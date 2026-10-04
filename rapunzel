@@ -23,6 +23,7 @@ source "${SCRIPT_DIR}/lib/profile.sh"
 usage() {
     cat >&2 <<'EOF'
 Usage: rapunzel [--harness NAME] [--shell] [PROJECT_DIR [harness arguments...]]
+       rapunzel-NAME [--shell] [PROJECT_DIR [harness arguments...]]
        rapunzel [--harness NAME] --exec PROJECT_DIR COMMAND [ARGS...]
 
 PROJECT_DIR defaults to the current directory. Harness arguments need an
@@ -41,7 +42,9 @@ Environment:
   RAPUNZEL_HARNESS        Harness profile (default: pi)
   RAPUNZEL_IMAGE          Image name (default: the profile's image)
   RAPUNZEL_VOLUME         Agent volume (default: per-project volume)
-  RAPUNZEL_ENV_FILE       Optional Docker env-file containing runtime secrets
+  RAPUNZEL_ENV_FILE       Docker env-file with runtime secrets (default:
+                          ~/.config/rapunzel/<harness>.env when it exists;
+                          set it empty to use none)
   RAPUNZEL_NETWORK        Docker network mode (default: bridge)
   RAPUNZEL_EGRESS         open (default), allowlist, or strict (docs/egress.md)
   RAPUNZEL_PORT           Host port for a harness web UI, on 127.0.0.1 (dsh)
@@ -59,6 +62,11 @@ EOF
 }
 
 HARNESS=${RAPUNZEL_HARNESS:-pi}
+# A link named rapunzel-<harness> (rapunzel-claude, ...) selects that harness.
+invoked_name=$(basename -- "${BASH_SOURCE[0]}")
+if [[ "$invoked_name" == rapunzel-* ]]; then
+    HARNESS=${invoked_name#rapunzel-}
+fi
 if [[ "${1:-}" == --harness ]]; then
     [[ $# -ge 2 ]] || usage
     HARNESS=$2
@@ -136,6 +144,16 @@ if [[ "$RUNTIME_UID" == 0 ]]; then
     exit 1
 fi
 
+# Without RAPUNZEL_ENV_FILE, use the harness's own file if there is one, so a
+# setup token or API key does not have to be named on every run. An empty
+# RAPUNZEL_ENV_FILE opts out.
+if [[ -z "${RAPUNZEL_ENV_FILE+x}" ]]; then
+    default_env_file="${XDG_CONFIG_HOME:-$HOME/.config}/rapunzel/${H_NAME}.env"
+    if [[ -f "$default_env_file" ]]; then
+        RAPUNZEL_ENV_FILE=$default_env_file
+        printf 'rapunzel: using env file %s\n' "$RAPUNZEL_ENV_FILE" >&2
+    fi
+fi
 if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
     if [[ ! -f "$RAPUNZEL_ENV_FILE" ]]; then
         printf 'rapunzel: env file does not exist: %s\n' "$RAPUNZEL_ENV_FILE" >&2
@@ -149,6 +167,13 @@ if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
 fi
 
 require_docker rapunzel
+# A local image name that was never built would otherwise send docker to pull
+# it from Docker Hub. Registry references (with a /) are left to docker.
+if [[ "$IMAGE" != */* ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    printf 'rapunzel: image %s is missing; build it with:\n  docker build --target %s -t %s %s\n' \
+        "$IMAGE" "$H_NAME" "$IMAGE" "$SCRIPT_DIR" >&2
+    exit 1
+fi
 
 filtered_env=""
 egress_dir=""

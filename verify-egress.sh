@@ -72,10 +72,12 @@ fail() {
 
 # Run the probe through rapunzel with the given environment assignments.
 probe() {
-    env -u RAPUNZEL_ENV_FILE -u RAPUNZEL_NETWORK -u RAPUNZEL_API_KEY_VARIABLE \
+    # An empty RAPUNZEL_ENV_FILE also keeps the launcher's default env file out.
+    env -u RAPUNZEL_NETWORK -u RAPUNZEL_API_KEY_VARIABLE -u RAPUNZEL_HARNESS \
         -u ANTHROPIC_API_KEY -u OPENAI_API_KEY -u RAPUNZEL_API_BASE_URL -u RAPUNZEL_BASE_URL \
         -u RAPUNZEL_EGRESS_ALLOW -u RAPUNZEL_EGRESS_LOGINS -u RAPUNZEL_EGRESS_ALLOW_PRIVATE \
         -u RAPUNZEL_BASE_URL_VARIABLE \
+        RAPUNZEL_ENV_FILE= \
         RAPUNZEL_IMAGE="$IMAGE" \
         RAPUNZEL_VOLUME="$VOLUME" \
         "$@" \
