@@ -1,8 +1,17 @@
 # rapunzel: Detailed Guide
 
 rapunzel runs coding-agent harnesses in a hardened Docker sandbox.
-The pi coding agent is the first supported harness and the only one so far; Claude Code, Codex CLI, and Copilot CLI are planned as further profiles.
-This guide therefore describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
+Each harness is a profile in `profiles/<name>/` with its own image and its own per-project volume:
+
+| Harness | `--harness` | Image | State directory (volume) | Credentials | Egress modes |
+|---|---|---|---|---|---|
+| pi (default) | `pi` | `rapunzel` | `/home/agent/.pi/agent` | provider keys, custom providers, `/login` | `open`, `allowlist`, `strict` |
+| Claude Code | `claude` | `rapunzel:claude` | `/home/agent/.claude` | `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` from the host's `claude setup-token` | `open`, `allowlist` |
+| Codex CLI | `codex` | `rapunzel:codex` | `/home/agent/.codex` | `OPENAI_API_KEY`/`CODEX_API_KEY`, or a ChatGPT login inside the sandbox | `open`, `allowlist` |
+
+Copilot CLI is planned.
+Most of this guide describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
+[Claude Code](#claude-code) and [Codex CLI](#codex-cli) have their own sections; the isolation, host-file, and egress controls are the same for every harness.
 
 This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md); for how and why it works, see the [architecture](architecture.md).
 
@@ -37,6 +46,18 @@ cd ~/src/my-project
 rapunzel
 ```
 
+To run another harness, build its image stage and select its profile with `--harness` (or `RAPUNZEL_HARNESS`):
+
+```bash
+docker build --pull --target claude -t rapunzel:claude .
+docker build --pull --target codex -t rapunzel:codex .
+rapunzel --harness claude
+rapunzel --harness codex . resume --last
+```
+
+`--harness` comes before every other argument.
+`--shell` and `--exec` work for every harness and use that harness's image, volume, and environment.
+
 Without a directory argument, `rapunzel` uses the current directory.
 Any other directory works the same way, such as `rapunzel ~/src/other-project`.
 Pass normal pi arguments after an explicit project directory; the first argument is always read as the directory, so write `rapunzel . --continue`, not `rapunzel --continue`:
@@ -55,7 +76,7 @@ Set `RAPUNZEL_VOLUME` only when deliberately opting into a shared volume:
 RAPUNZEL_IMAGE=my-rapunzel RAPUNZEL_VOLUME=my-rapunzel-agent rapunzel
 ```
 
-The wrapper refuses to run pi as root because the project bind mount must be writable by the caller's non-root UID.
+The wrapper refuses to run any harness as root because the project bind mount must be writable by the caller's non-root UID.
 The named volume is created root-owned, so `lib/volumes.sh` prepares its ownership for the invoking UID/GID on every platform, including Docker Desktop.
 The preparation is idempotent: a marker file records the owner, so subsequent runs only read it.
 
@@ -96,7 +117,9 @@ OPENAI_API_KEY="$OPENAI_API_KEY" rapunzel . --provider openai --model gpt-5.6-lu
 ```
 
 The wrapper does not forward the host environment wholesale.
-It forwards only an allowlist of provider credentials, pi configuration variables, and proxy variables, plus variables explicitly named by `RAPUNZEL_API_KEY_VARIABLE`.
+It forwards only an allowlist of provider credentials, the harness profile's configuration variables, and proxy variables, plus variables explicitly named by `RAPUNZEL_API_KEY_VARIABLE`.
+A profile's variables reach only that harness: `CLAUDE_CODE_OAUTH_TOKEN`, for example, is dropped for pi.
+`TZ` is set from the host's `TZ` or `/etc/localtime`, so times inside the container match the host; only a plain zone name such as `Europe/Berlin` is passed.
 The same allowlist filters `RAPUNZEL_ENV_FILE`: entries whose names are not allowlisted are dropped with a warning, so the file cannot set `LD_PRELOAD`, `BASH_ENV`, `NODE_OPTIONS`, `PATH`, or other container-affecting variables.
 `RAPUNZEL_HEADERS_JSON` values are written to `models.json` inside the volume, so avoid credentials there; the bootstrap warns when it detects a credential-like header name.
 
@@ -146,6 +169,59 @@ Use pi's `--approve` for a single run or `/trust` interactively only when the mo
 Trust is persisted in the selected volume and is keyed by the in-container path `/workspace`, so an explicitly shared volume also shares that trust decision across projects.
 The per-project default avoids this collapse.
 
+## Claude Code
+
+`rapunzel --harness claude` runs Claude Code in the `rapunzel:claude` image.
+`CLAUDE_CONFIG_DIR` points at the volume (`/home/agent/.claude`), so its settings, `.claude.json` state, sessions, and logins all stay in the project's volume; the host `~/.claude` and `~/.claude.json` are never mounted or copied.
+
+Credentials:
+
+- **Subscription.** Create a long-lived token once on the host with `claude setup-token`, store it as `CLAUDE_CODE_OAUTH_TOKEN` in a mode-600 env file, and pass that file with `RAPUNZEL_ENV_FILE`. The token enters as an environment variable on each run and is never written to the volume. Your host login, which macOS keeps in the Keychain, is not copied, so its refresh token never enters the sandbox and host and sandbox sessions do not invalidate each other. The token is valid for a year; revoke it in your Claude account settings.
+- **API key.** `ANTHROPIC_API_KEY`, forwarded like for pi.
+- **Interactive login.** Without either, Claude Code shows its usual login picker and keeps the result in the volume.
+
+With a token or API key set, `profiles/claude/bootstrap.mjs` marks first-run onboarding as done in `.claude.json`, so Claude Code uses the credential without asking for a login method.
+The login picker cannot be left with Ctrl+C; finish or stop it with `docker stop` if needed.
+
+Egress:
+
+- `allowlist` always allows `api.anthropic.com`, which is enough for both an API key and a setup token. An interactive subscription login also needs `RAPUNZEL_EGRESS_LOGINS=anthropic` and `RAPUNZEL_EGRESS_ALLOW=claude.ai`.
+- Both restricted modes set `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1`.
+- `strict` is refused: pointing Claude Code at the gateway with a placeholder key is untested, and a subscription token cannot go through the gateway at all, because the gateway replaces auth headers with its own key.
+
+Claude Code honors `HTTPS_PROXY`, so it reaches the allowlist proxy like pi.
+It retries an API error up to ten times with backoff, so a failing `claude -p` can take minutes to return.
+Its own permission prompts and modes work as usual inside the container.
+
+## Codex CLI
+
+`rapunzel --harness codex` runs the Codex CLI in the `rapunzel:codex` image.
+`CODEX_HOME` points at the volume (`/home/agent/.codex`), which holds `config.toml`, `auth.json`, and sessions.
+
+Credentials:
+
+- **ChatGPT subscription.** Sign in once per project volume with the device-code flow, which needs no callback into the container:
+
+  ```bash
+  rapunzel --harness codex --exec . codex login --device-auth
+  ```
+
+  Codex prints a link and a one-time code; open the link in your host browser and enter the code. The login is stored as `auth.json` (mode 600) in the volume. The host `~/.codex` is never mounted or copied, so host and sandbox sessions stay independent.
+- **API key.** `OPENAI_API_KEY` or `CODEX_API_KEY`.
+
+On every start, `profiles/codex/bootstrap.mjs` adds these defaults to `config.toml` when they are not set at the top level; values you set yourself win:
+
+- `sandbox_mode = "danger-full-access"`. Codex's own Linux sandbox (bubblewrap) needs user namespaces, which the container does not grant, so every sandboxed command would fail. The container is the boundary; Codex still asks for approval before running commands.
+- `cli_auth_credentials_store = "file"`, because there is no keyring in the container.
+- `check_for_update_on_startup = false` and `analytics = { enabled = false }`.
+
+Egress:
+
+- `allowlist` with a subscription login needs `RAPUNZEL_EGRESS_LOGINS=openai-codex` (`chatgpt.com`, `auth.openai.com`), both for signing in and for the model API. An API key adds `api.openai.com` through `OPENAI_API_KEY`.
+- `strict` is refused until a gateway route for Codex is tested.
+
+The image also contains `procps`, because the interactive CLI manages its background app-server with `ps`.
+
 ## Isolation properties
 
 Each normal `rapunzel` run has exactly these intentional host mounts:
@@ -155,7 +231,7 @@ PROJECT_DIR (read-write)            -> /workspace
 PROJECT_DIR/.git/config (read-only) -> /workspace/.git/config
 PROJECT_DIR/.git/hooks (read-only)  -> /workspace/.git/hooks
 in-project core.hooksPath (read-only, if set, e.g. .husky)
-named Docker volume                 -> /home/agent/.pi/agent
+named Docker volume                 -> the harness state directory (pi: /home/agent/.pi/agent)
 ```
 
 The project is the only host directory mounted; the read-only entries are parts of it, described in [Files the host runs](#files-the-host-runs).
@@ -166,7 +242,7 @@ The runtime uses a caller-mapped non-root UID, drops all Linux capabilities, and
 The following are deliberately not mounted or copied:
 
 - The host home directory.
-- The host `~/.pi` or `~/.pi/agent`.
+- The host `~/.pi` or `~/.pi/agent`, `~/.claude` or `~/.claude.json`, and `~/.codex`.
 - The host `~/.ssh`.
 - Host shell configuration, npm configuration, credentials, sessions, or arbitrary environment variables.
 
@@ -232,7 +308,13 @@ It verifies that:
 - Host-looking paths such as `/Users`, `/Volumes`, `/private`, host `.pi`, and host `.ssh` are not visible.
 - `/proc/self/mountinfo` contains the project and agent mounts but no host home-related bind mount.
 
-The optional `RAPUNZEL_VOLUME` variable selects the volume used by the check.
+The optional `RAPUNZEL_VOLUME` variable selects the volume used by the check, and `RAPUNZEL_HARNESS` selects the profile (and so the image and state directory) for both `verify-isolation.sh` and `./test.sh`:
+
+```bash
+RAPUNZEL_HARNESS=claude ./test.sh
+RAPUNZEL_HARNESS=codex RAPUNZEL_VOLUME=rapunzel-isolation-codex ./verify-isolation.sh .
+```
+
 Use a throwaway volume for a clean check:
 
 ```bash
@@ -286,6 +368,15 @@ Rebuild with a deliberate version change:
 ```bash
 docker build --pull --build-arg PI_VERSION=1.0.1 -t rapunzel .
 ```
+
+The other harnesses pin their versions the same way, with `CLAUDE_VERSION` and `CODEX_VERSION`:
+
+```bash
+docker build --pull --target claude --build-arg CLAUDE_VERSION=2.1.289 -t rapunzel:claude .
+docker build --pull --target codex --build-arg CODEX_VERSION=0.160.0 -t rapunzel:codex .
+```
+
+Their auto-updaters cannot write the root-owned install (Codex's update check is off, and Claude Code's updater is off in the restricted egress modes), so update by rebuilding.
 
 The named volumes persist across image updates.
 Back one up or delete it deliberately if you want to reset container-local settings and sessions:
@@ -365,7 +456,8 @@ RAPUNZEL_NETWORK=none rapunzel . --offline
 Both restricted modes put pi on a per-run Docker network created with `--internal` and isolated gateway mode, so it has no route off that network, no upstream DNS, and no address on the host side of the bridge.
 The only other member is a sidecar container, which is pi's only way out.
 The sidecar and both networks are removed when pi exits.
-Both modes need Docker Engine 28 or newer, set `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`, and cannot be combined with `RAPUNZEL_NETWORK`.
+Both modes need Docker Engine 28 or newer, set the harness's offline switches (for pi `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`), and cannot be combined with `RAPUNZEL_NETWORK`.
+`strict` is available for pi only; the other harnesses refuse it.
 
 ### allowlist mode
 
