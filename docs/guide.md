@@ -8,10 +8,11 @@ Each harness is a profile in `profiles/<name>/` with its own image and its own p
 | pi (default) | `pi` | `rapunzel` | `/home/agent/.pi/agent` | provider keys, custom providers, `/login` | `open`, `allowlist`, `strict` |
 | Claude Code | `claude` | `rapunzel:claude` | `/home/agent/.claude` | `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` from the host's `claude setup-token` | `open`, `allowlist` |
 | Codex CLI | `codex` | `rapunzel:codex` | `/home/agent/.codex` | `OPENAI_API_KEY`/`CODEX_API_KEY`, or a ChatGPT login inside the sandbox | `open`, `allowlist` |
+| DeepSeek Harness | `dsh` | `rapunzel:dsh` | `/home/agent/.dsh` | `DEEPSEEK_API_KEY` | web UI: `open`; headless: `open`, `allowlist` |
 
 Copilot CLI is planned.
 Most of this guide describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
-[Claude Code](#claude-code) and [Codex CLI](#codex-cli) have their own sections; the isolation, host-file, and egress controls are the same for every harness.
+[Claude Code](#claude-code), [Codex CLI](#codex-cli), and [DeepSeek Harness](#deepseek-harness) have their own sections; the isolation, host-file, and egress controls are the same for every harness.
 
 This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md); for how and why it works, see the [architecture](architecture.md).
 
@@ -221,6 +222,35 @@ Egress:
 - `strict` is refused until a gateway route for Codex is tested.
 
 The image also contains `procps`, because the interactive CLI manages its background app-server with `ps`.
+
+## DeepSeek Harness
+
+`rapunzel --harness dsh` runs [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`, a developer preview) in the `rapunzel:dsh` image.
+`DSH_HOME` points at the volume (`/home/agent/.dsh`), which holds dsh's profiles, `.credentials.yaml`, sessions, and storages.
+Pass `DEEPSEEK_API_KEY` like any provider key; `EXA_API_KEY` and `PERPLEXITY_API_KEY` are forwarded for web search.
+
+dsh has no terminal UI, so it runs in one of two ways:
+
+- **Web UI**, the default. Without harness arguments, rapunzel runs `dsh web --patch /usr/local/lib/rapunzel/dsh-web.patch.yml --no-open --port 3080` and publishes the port on the host's `127.0.0.1` only. Open the URL with `?token=` that dsh prints; the token sets a session cookie, and requests without it get `401`. Set `RAPUNZEL_PORT` (1024-65535) to use another port, for example to run two projects at once. The patch makes dsh listen on all interfaces inside the container so Docker can forward the port, which dsh's own `--host` flag refuses; dsh then also prints a `LAN` URL with the container's bridge address, which other containers on the default bridge could reach, still only with the token. The web UI requires `RAPUNZEL_EGRESS=open`: the restricted modes put the container on an `--internal` network, from which Docker publishes no ports.
+- **Headless**, one task per run, in every supported egress mode:
+
+  ```bash
+  rapunzel --harness dsh --exec . dsh headless "run the tests"
+  rapunzel --harness dsh --exec . dsh headless --session-id <id> "continue"
+  ```
+
+dsh keeps its own sandbox: bash and file changes run under Landlock with approval prompts (`workspace-write`, approval on request).
+Landlock needs no capabilities and works inside the container; bubblewrap, its first choice, does not, and dsh falls back on its own.
+`DSH_PERMISSION_MODE` and the other `DSH_*` paths cannot be set from the host, so the sandbox cannot be switched off through rapunzel's environment.
+
+On first start, `profiles/dsh/bootstrap.mjs` writes a home-level `cordis.patch.yml` into the volume that turns off `session-log-deepseek`, which otherwise attaches the session log to requests against the official DeepSeek API.
+The file is yours afterwards; delete the row to turn uploads back on.
+In the restricted modes, `DSH_TELEMETRY_MODE=DISABLED` also turns off OpenTelemetry feedback uploads, which would bypass the proxy.
+
+Egress:
+
+- `allowlist` always allows `api.deepseek.com`. dsh honors `HTTPS_PROXY` for its own requests and for the child processes it starts. Add sites for its `web_fetch` tool with `RAPUNZEL_EGRESS_ALLOW`.
+- `strict` is refused until a gateway route for DeepSeek's API is tested.
 
 ## Isolation properties
 

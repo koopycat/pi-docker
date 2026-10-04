@@ -96,6 +96,32 @@ USER agent
 CMD ["codex"]
 
 # ---------------------------------------------------------------------------
+# dsh: profiles/dsh/profile.sh
+# ---------------------------------------------------------------------------
+FROM base AS dsh
+
+ARG DSH_PACKAGE=@deepseek-ai/dsh
+ARG DSH_VERSION=0.2.0-rc.2
+
+# Native helpers (Landlock launcher, flock) come as prebuilt optional
+# dependencies without install scripts, so --ignore-scripts is enough.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --ignore-scripts "${DSH_PACKAGE}@${DSH_VERSION}" \
+    && dsh --version
+
+RUN mkdir -p /home/agent/.dsh \
+    && chown agent:agent /home/agent/.dsh
+
+COPY --chmod=0755 profiles/dsh/bootstrap.mjs /usr/local/lib/rapunzel/bootstrap-harness.mjs
+COPY --chmod=0644 profiles/dsh/web.patch.yml /usr/local/lib/rapunzel/dsh-web.patch.yml
+
+ENV RAPUNZEL_STATE_DIR=/home/agent/.dsh \
+    DSH_HOME=/home/agent/.dsh
+
+USER agent
+CMD ["dsh", "headless", "--help"]
+
+# ---------------------------------------------------------------------------
 # pi: profiles/pi/profile.sh
 # ---------------------------------------------------------------------------
 FROM base AS pi

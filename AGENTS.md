@@ -1,13 +1,13 @@
 # rapunzel: Docker sandbox for coding-agent harnesses
 
-pi is the default harness; Claude Code and Codex CLI are further profiles, and Copilot CLI is planned.
+pi is the default harness; Claude Code, Codex CLI, and DeepSeek Harness (dsh) are further profiles, and Copilot CLI is planned.
 
 ## Commands
 
 - `docker build -t rapunzel .`
 - `./rapunzel [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
 - `./rapunzel --shell [PROJECT_DIR]`
-- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
+- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`, `dsh`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
 - `./rapunzel-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`
@@ -31,6 +31,7 @@ pi is the default harness; Claude Code and Codex CLI are further profiles, and C
 - allowlist mode: Pipelock must keep `sni_verification` and `sni_require_tls` on; `HTTP_PROXY` stays unset so cleartext fails closed. Allowed hosts come only from the host side (keys, base URL, `RAPUNZEL_EGRESS_LOGINS`, `RAPUNZEL_EGRESS_ALLOW`, `RAPUNZEL_EGRESS_ALLOW_PRIVATE`), never from agent-writable state such as `auth.json`. Private destinations are trusted only for exact names in `RAPUNZEL_EGRESS_ALLOW_PRIVATE`.
 - strict mode: pi receives no provider credentials; the Caddy gateway always overwrites auth headers and answers unknown routes with 403.
 - Sidecar images are pinned by digest in `lib/egress.sh` and never automerged. Any change there must keep `./verify-egress.sh` passing.
+- The launcher publishes no ports, except a profile's web UI (`H_WEB_PORT`, dsh) when the harness runs with its default arguments in `open` egress mode: one port, bound to the host's `127.0.0.1` only, with the harness's own authentication left on.
 - Do not mount the host home directory, `~/.pi`, or `~/.ssh`.
 - `/home/agent` and `/home/agent/.pi` are mode 1777 because the runtime UID is the caller's, not the image's 1001; extensions write caches such as `~/.pi/cache` there.
 - Since pi 1.0.1 the package ships no `npm-shrinkwrap.json`, so transitive dependencies resolve at build time. `lib/prune-foreign-platforms.mjs` stays as a guard against foreign `@esbuild/*` platform binaries and must run in the same `RUN` layer as `npm install`.

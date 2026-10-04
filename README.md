@@ -2,7 +2,7 @@
 
 rapunzel runs coding-agent harnesses against a project inside a hardened Docker sandbox. The agent sees one host directory, the project mounted at `/workspace`, and keeps its settings, logins, sessions, and extensions in a separate Docker volume per project. It runs without root, receives only an allowlist of environment variables, and can be limited to named hosts or kept away from your provider keys entirely.
 
-The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`); both support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
+The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`), and [DeepSeek Harness](#deepseek-harness) (`--harness dsh`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`); they support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
 
 The name: Rapunzel is kept in a tower whose only way out is a single strand you control. Here the tower is the container, and the strand is the one project directory and, optionally, the one egress proxy.
 
@@ -82,6 +82,16 @@ Use `OPENAI_API_KEY` (or `CODEX_API_KEY`), or sign in with your ChatGPT subscrip
 Codex prints a link and a one-time code; finish the sign-in in your host browser. The login is stored in the project's volume (`auth.json` in `CODEX_HOME`), not copied from the host's `~/.codex`, so host and sandbox sessions stay independent. With `RAPUNZEL_EGRESS=allowlist`, a subscription login needs `RAPUNZEL_EGRESS_LOGINS=openai-codex` (`chatgpt.com`, `auth.openai.com`); `strict` is not supported for Codex yet.
 
 Codex's own sandbox (bubblewrap) cannot create namespaces inside rapunzel's container, so the entrypoint defaults `sandbox_mode` to `danger-full-access` in `config.toml`; the container is the boundary, and Codex still asks for approval. It also stores logins in a file and turns off update checks and analytics. Values you set yourself in `config.toml` win.
+
+## DeepSeek Harness
+
+```bash
+docker build --target dsh -t rapunzel:dsh .
+DEEPSEEK_API_KEY=... ./rapunzel --harness dsh                     # web UI
+DEEPSEEK_API_KEY=... ./rapunzel --harness dsh --exec . dsh headless "run the tests"
+```
+
+DeepSeek Harness (`dsh`) has no terminal UI. Without harness arguments, rapunzel starts `dsh web` and publishes it on `127.0.0.1:3080` only (`RAPUNZEL_PORT` changes the port); open the tokenized URL dsh prints. The web UI needs `RAPUNZEL_EGRESS=open`, because the restricted modes have no published ports. `dsh headless` works in `allowlist` mode too (`api.deepseek.com` is allowed). dsh keeps its own Landlock sandbox and approval prompts, which work inside the container, and rapunzel seeds a home-level patch that turns off dsh's default session-log upload to the DeepSeek API.
 
 ## What stays separate
 

@@ -44,6 +44,7 @@ Environment:
   RAPUNZEL_ENV_FILE       Optional Docker env-file containing runtime secrets
   RAPUNZEL_NETWORK        Docker network mode (default: bridge)
   RAPUNZEL_EGRESS         open (default), allowlist, or strict (docs/egress.md)
+  RAPUNZEL_PORT           Host port for a harness web UI, on 127.0.0.1 (dsh)
   RAPUNZEL_EGRESS_ALLOW   Extra hosts for allowlist mode, comma-separated
   RAPUNZEL_EGRESS_LOGINS  /login providers for allowlist mode, comma-separated:
                           openai, openai-codex, anthropic, github-copilot
@@ -469,6 +470,27 @@ fi
 if [[ "$EXEC_MODE" == true ]]; then
     docker "${args[@]}" "$IMAGE" "$@"
     exit
+fi
+
+# A harness without a terminal UI (dsh) gets its default arguments and, for a
+# web UI, a port published on the host's loopback only. Explicit harness
+# arguments replace the defaults and publish nothing.
+if [[ $# -eq 0 && ${#H_DEFAULT_ARGS[@]} -gt 0 ]]; then
+    set -- "${H_DEFAULT_ARGS[@]}"
+    if [[ -n "$H_WEB_PORT" ]]; then
+        if [[ "$EGRESS" != open ]]; then
+            printf 'rapunzel: the %s web UI needs RAPUNZEL_EGRESS=open for now; restricted modes have no published ports\n' "$H_NAME" >&2
+            exit 2
+        fi
+        web_port=${RAPUNZEL_PORT:-$H_WEB_PORT}
+        if [[ ! "$web_port" =~ ^[0-9]+$ ]] || ((web_port < 1024 || web_port > 65535)); then
+            printf 'rapunzel: RAPUNZEL_PORT must be a port from 1024 to 65535, got: %s\n' "$web_port" >&2
+            exit 2
+        fi
+        args+=(--publish "127.0.0.1:${web_port}:${web_port}")
+        set -- "$@" "$H_WEB_PORT_ARG" "$web_port"
+        printf 'rapunzel: %s web UI on http://127.0.0.1:%s (open the tokenized URL it prints)\n' "$H_NAME" "$web_port" >&2
+    fi
 fi
 
 docker "${args[@]}" "$IMAGE" "$H_CMD" "$@"
