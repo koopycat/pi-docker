@@ -6,11 +6,24 @@ on:
       - main
     tags:
       - "v*"
+    # Path filters are not evaluated for tag pushes, so releases always publish.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+      - ".env.example"
+      - ".gitignore"
+      - "renovate.json"
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+
+# One run per ref, in push order, so an older run never overwrites :latest
+# after a newer one; superseded main pushes are cancelled, tag runs never are.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type == 'branch' }}
 
 jobs:
   test:
@@ -19,6 +32,10 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

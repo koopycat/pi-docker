@@ -36,3 +36,4 @@ pi is the default harness; Claude Code, Codex CLI, and DeepSeek Harness (dsh) ar
 - `/home/agent` and `/home/agent/.pi` are mode 1777 because the runtime UID is the caller's, not the image's 1001; extensions write caches such as `~/.pi/cache` there.
 - Since pi 1.0.1 the package ships no `npm-shrinkwrap.json`, so transitive dependencies resolve at build time. `lib/prune-foreign-platforms.mjs` stays as a guard against foreign `@esbuild/*` platform binaries and must run in the same `RUN` layer as `npm install`.
 - `publish-image.yml` calls `ci.yml` and publishes only after it passes; do not add a separate push trigger to `ci.yml`.
+- Both workflows skip docs-only changes with `paths-ignore`, which is safe only while `main` has no required status checks; drop the `pull_request` filter in `ci.yml` before making `test` required. Keep the job timeouts and concurrency groups.

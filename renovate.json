@@ -2,6 +2,8 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "mode": "full",
+  "timezone": "Europe/Berlin",
+  "rebaseWhen": "conflicted",
   "customManagers": [
     {
       "description": "Pinned pi version in the Dockerfile and the guide",
@@ -29,14 +31,17 @@
     {
       "description": "The egress sidecars are the network boundary; review every update",
       "matchFileNames": ["lib/egress.sh"],
-      "automerge": false
+      "automerge": false,
+      "groupName": "egress sidecars",
+      "schedule": ["* 0-5 * * 1"]
     },
     {
       "description": "Wait out quick follow-up fixes; ci.yml gates every bump",
       "matchDepNames": ["@earendil-works/pi-coding-agent"],
       "minimumReleaseAge": "1 day",
       "semanticCommitType": "feat",
-      "semanticCommitScope": "pi"
+      "semanticCommitScope": "pi",
+      "schedule": ["* 0-5 * * 1,4"]
     },
     {
       "description": "Merge pi patch releases once CI is green; 0.x minors can break and stay open for review. Renovate merges itself because main has no required checks.",
@@ -44,6 +49,17 @@
       "matchUpdateTypes": ["patch"],
       "automerge": true,
       "platformAutomerge": false
+    },
+    {
+      "description": "Pinned action SHAs: one weekly PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions",
+      "schedule": ["* 0-5 * * 1"]
+    },
+    {
+      "description": "Base image updates weekly",
+      "matchManagers": ["dockerfile"],
+      "schedule": ["* 0-5 * * 1"]
     }
   ]
 }

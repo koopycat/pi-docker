@@ -4,14 +4,32 @@ name: CI
 # publishes after it passes.
 on:
   pull_request:
+    # Safe only while main has no required checks: a required check that never
+    # starts would block docs-only PRs.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "LICENSE"
+      - ".env.example"
+      - ".gitignore"
+      - "renovate.json"
   workflow_call:
 
 permissions:
   contents: read
 
+# PRs: a newer push cancels the older run. Called from publish-image.yml the
+# group is that run's own id; never use github.workflow here, because in a
+# called workflow it is the caller's name and a shared group deadlocks.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A caller job that uses ci.yml cannot set a timeout, so it lives here.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
