@@ -46,6 +46,26 @@ rapunzel --shell
 
 Set a provider key in your environment before launching Pi. The runner passes supported provider keys and configuration variables at runtime. For a custom API endpoint, start with [.env.example](.env.example) and follow the [provider setup guide](docs/guide.md#provider-configuration). Keep real secrets outside the repository and Docker build context.
 
+## Claude Code
+
+```bash
+docker build --target claude -t rapunzel:claude .
+./rapunzel --harness claude [PROJECT_DIR [claude arguments...]]
+```
+
+To reuse your host's Claude subscription instead of logging in again inside every project volume, create a long-lived token once on the host and pass it per run:
+
+```bash
+claude setup-token                     # on the host; prints a token
+printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' '<token>' >> ~/.config/rapunzel/claude.env
+chmod 600 ~/.config/rapunzel/claude.env
+RAPUNZEL_ENV_FILE=~/.config/rapunzel/claude.env ./rapunzel --harness claude .
+```
+
+The token enters the container as an environment variable and is never written to the volume, and no refresh token from your host login is copied, so host and sandbox sessions do not invalidate each other. Revoke it from your Claude account settings when you no longer need it. With a token or `ANTHROPIC_API_KEY` set, the entrypoint marks first-run onboarding as done so Claude Code skips the login picker.
+
+`RAPUNZEL_EGRESS=allowlist` works with either credential (`api.anthropic.com` is always allowed for this harness); `strict` is not supported for Claude Code yet.
+
 ## What stays separate
 
 - Each project gets its own persistent Docker volume for the agent's settings, login credentials, sessions, trust decisions, and installed extensions.

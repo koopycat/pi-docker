@@ -57,6 +57,8 @@ RUN --mount=type=cache,target=/root/.npm \
 RUN mkdir -p /home/agent/.claude \
     && chown agent:agent /home/agent/.claude
 
+COPY --chmod=0755 profiles/claude/bootstrap.mjs /usr/local/lib/rapunzel/bootstrap-harness.mjs
+
 ENV RAPUNZEL_STATE_DIR=/home/agent/.claude \
     CLAUDE_CONFIG_DIR=/home/agent/.claude
 

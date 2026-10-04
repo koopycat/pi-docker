@@ -11,8 +11,10 @@ H_IMAGE=rapunzel:claude
 H_STATE_DIR=/home/agent/.claude
 H_STATE_ENV=CLAUDE_CONFIG_DIR
 
-# ANTHROPIC_API_KEY is in the launcher's shared list.
-H_ENV_ALLOW=(ANTHROPIC_MODEL)
+# ANTHROPIC_API_KEY is in the launcher's shared list. CLAUDE_CODE_OAUTH_TOKEN is
+# the host's subscription login, from `claude setup-token` on the host; it is
+# passed per run and never written to the volume.
+H_ENV_ALLOW=(ANTHROPIC_MODEL CLAUDE_CODE_OAUTH_TOKEN)
 H_ENV_ALLOW_GATEWAY=()
 H_ENV_DENY=(CLAUDE_CONFIG_DIR)
 # Auto-update, telemetry, error reporting, and feature-flag fetches have no
