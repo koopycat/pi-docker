@@ -34,3 +34,7 @@ H_ENV_ALLOW_GATEWAY=(
 H_ENV_DENY=(PI_CODING_AGENT_DIR PI_CODING_AGENT_SESSION_DIR)
 # Set in allowlist and strict mode, where pi.dev is not reachable.
 H_OFFLINE_ENV=(PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0)
+# Hosts allowed in allowlist mode regardless of keys (pi derives its hosts
+# from keys, logins, and base URLs instead).
+H_EGRESS_HOSTS=()
+H_STRICT_SUPPORTED=true

@@ -2,7 +2,7 @@
 
 rapunzel runs coding-agent harnesses against a project inside a hardened Docker sandbox. The agent sees one host directory, the project mounted at `/workspace`, and keeps its settings, logins, sessions, and extensions in a separate Docker volume per project. It runs without root, receives only an allowlist of environment variables, and can be limited to named hosts or kept away from your provider keys entirely.
 
-The [pi coding agent](https://github.com/earendil-works/pi-mono) is the first supported harness, and currently the only one. Claude Code, Codex CLI, and Copilot CLI are planned as further profiles on the same launcher.
+The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. Claude Code is the second (`--harness claude`, image `rapunzel:claude`, built with `docker build --target claude -t rapunzel:claude .`); it supports `open` and `allowlist` egress, not `strict` yet. Codex CLI and Copilot CLI are planned as further profiles on the same launcher.
 
 The name: Rapunzel is kept in a tower whose only way out is a single strand you control. Here the tower is the container, and the strand is the one project directory and, optionally, the one egress proxy.
 

@@ -19,7 +19,7 @@ source "${SCRIPT_DIR}/lib/profile.sh"
 
 load_profile "${RAPUNZEL_HARNESS:-pi}"
 IMAGE=${RAPUNZEL_IMAGE:-$H_IMAGE}
-VOLUME=${RAPUNZEL_VOLUME:-rapunzel-test}
+VOLUME=${RAPUNZEL_VOLUME:-rapunzel-test-${H_NAME}}
 
 [[ "$(id -u)" != 0 ]] || {
     printf 'Refusing to run tests as root; invoke as a non-root user.\n' >&2
@@ -46,12 +46,12 @@ run() {
 }
 
 # Run through the real entrypoint so the bootstrap step is exercised too.
-version=$(run pi --version)
+version=$(run "$H_CMD" --version)
 [[ -n "$version" ]] || {
-    printf 'pi --version produced no output\n' >&2
+    printf '%s --version produced no output\n' "$H_CMD" >&2
     exit 1
 }
-printf 'pi version: %s\n' "$version"
+printf '%s version: %s\n' "$H_NAME" "$version"
 
 identity=$(run id -un)
 [[ "$identity" == "agent" ]] || {
@@ -60,31 +60,36 @@ identity=$(run id -un)
 }
 printf 'identity: %s (%s)\n' "$identity" "$(run id -gn)"
 
-run node -e 'JSON.parse(require("fs").readFileSync("/home/agent/.pi/agent/settings.json","utf8"))'
-run test -s /home/agent/.pi/agent/settings.json
-run test -s /home/agent/.pi/agent/models.json
-
-# Sessions must stay in the volume: pi resolves a relative sessionDir from
-# /workspace, the mounted project. Plant the old relative value first.
-run node -e '
-    const fs = require("fs"), f = "/home/agent/.pi/agent/settings.json";
-    const s = JSON.parse(fs.readFileSync(f, "utf8")); s.sessionDir = "sessions";
-    fs.writeFileSync(f, JSON.stringify(s));
-'
-session_dir=$(run node -p 'require("/home/agent/.pi/agent/settings.json").sessionDir')
-[[ "$session_dir" == /home/agent/.pi/agent/sessions ]] || {
-    printf 'sessionDir is %s, expected the agent volume\n' "$session_dir" >&2
-    exit 1
-}
-
 # HOME must be writable by the caller's UID, not only the image's UID 1001.
 run bash -c 'touch "$HOME/.probe" && git config --global user.name probe'
 
-# The platform pruning in the Dockerfile must keep this platform's esbuild binary.
-run node -e '
-    const { createRequire } = require("node:module");
-    const require_ = createRequire("/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/package.json");
-    require_("esbuild").transformSync("let x: number = 1", { loader: "ts" });
-'
+# State directory is writable and bootstrapped by the entrypoint.
+run test -w "$H_STATE_DIR"
+
+if [[ "$H_NAME" == pi ]]; then
+    run node -e 'JSON.parse(require("fs").readFileSync("/home/agent/.pi/agent/settings.json","utf8"))'
+    run test -s /home/agent/.pi/agent/settings.json
+    run test -s /home/agent/.pi/agent/models.json
+
+    # Sessions must stay in the volume: pi resolves a relative sessionDir from
+    # /workspace, the mounted project. Plant the old relative value first.
+    run node -e '
+        const fs = require("fs"), f = "/home/agent/.pi/agent/settings.json";
+        const s = JSON.parse(fs.readFileSync(f, "utf8")); s.sessionDir = "sessions";
+        fs.writeFileSync(f, JSON.stringify(s));
+    '
+    session_dir=$(run node -p 'require("/home/agent/.pi/agent/settings.json").sessionDir')
+    [[ "$session_dir" == /home/agent/.pi/agent/sessions ]] || {
+        printf 'sessionDir is %s, expected the agent volume\n' "$session_dir" >&2
+        exit 1
+    }
+
+    # The platform pruning in the Dockerfile must keep this platform's esbuild binary.
+    run node -e '
+        const { createRequire } = require("node:module");
+        const require_ = createRequire("/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/package.json");
+        require_("esbuild").transformSync("let x: number = 1", { loader: "ts" });
+    '
+fi
 
 printf 'PASS: offline smoke test\n'

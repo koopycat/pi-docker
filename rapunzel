@@ -111,6 +111,10 @@ if [[ -n "${RAPUNZEL_EGRESS_LOGINS:-}" && "$EGRESS" != allowlist ]]; then
     printf 'rapunzel: RAPUNZEL_EGRESS_LOGINS needs RAPUNZEL_EGRESS=allowlist (strict mode cannot keep /login credentials out of the sandbox)\n' >&2
     exit 2
 fi
+if [[ "$EGRESS" == strict && "$H_STRICT_SUPPORTED" != true ]]; then
+    printf 'rapunzel: the %s harness does not support RAPUNZEL_EGRESS=strict yet; use allowlist\n' "$H_NAME" >&2
+    exit 2
+fi
 case "$EGRESS" in
     open) ;;
     allowlist | strict)
@@ -365,6 +369,9 @@ if [[ "$EGRESS" != open ]]; then
     egress_dir=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-egress.XXXXXX")
     egress_networks_create
     if [[ "$EGRESS" == allowlist ]]; then
+        for host in ${H_EGRESS_HOSTS[@]+"${H_EGRESS_HOSTS[@]}"}; do
+            egress_allow_host "$host"
+        done
         [[ -z "$(runtime_value ANTHROPIC_API_KEY)" ]] || egress_allow_host api.anthropic.com
         [[ -z "$(runtime_value OPENAI_API_KEY)" ]] || egress_allow_host api.openai.com
         if [[ -n "$custom_url" ]]; then

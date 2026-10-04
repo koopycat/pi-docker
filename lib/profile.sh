@@ -20,6 +20,8 @@ load_profile() {
     fi
     # shellcheck disable=SC2034
     H_ENV_ALLOW=() H_ENV_ALLOW_GATEWAY=() H_ENV_DENY=() H_OFFLINE_ENV=()
+    # shellcheck disable=SC2034
+    H_EGRESS_HOSTS=() H_STRICT_SUPPORTED=true
     # shellcheck disable=SC1090
     source "${PROFILES_DIR}/${name}/profile.sh"
     for var in H_NAME H_CMD H_IMAGE H_STATE_DIR H_STATE_ENV; do

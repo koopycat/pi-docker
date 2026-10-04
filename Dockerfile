@@ -2,7 +2,8 @@
 
 # Shared base: everything a harness needs except the harness itself. Each
 # harness is its own final stage, so one harness's dependencies never ship in
-# another's image. `docker build -t rapunzel .` builds the last stage, pi.
+# another's image. `docker build -t rapunzel .` builds the last stage, so pi stays last; build
+# another harness with `--target <name>`.
 FROM node:24-bookworm-slim AS base
 
 RUN apt-get update \
@@ -35,6 +36,32 @@ ENV HOME=/home/agent
 
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/rapunzel-entrypoint"]
+
+# ---------------------------------------------------------------------------
+# claude: profiles/claude/profile.sh
+# ---------------------------------------------------------------------------
+FROM base AS claude
+
+ARG CLAUDE_PACKAGE=@anthropic-ai/claude-code
+ARG CLAUDE_VERSION=2.1.289
+
+# The package ships a placeholder binary and a postinstall that links in the
+# platform's native one from an optional dependency. --ignore-scripts keeps
+# every other package's scripts off, so run only this package's script by hand.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --ignore-scripts "${CLAUDE_PACKAGE}@${CLAUDE_VERSION}" \
+    && (cd "$(npm root -g)/${CLAUDE_PACKAGE}" && node install.cjs) \
+    && claude --version
+
+# Claude Code writes its config, logins, and sessions here, as the caller's UID.
+RUN mkdir -p /home/agent/.claude \
+    && chown agent:agent /home/agent/.claude
+
+ENV RAPUNZEL_STATE_DIR=/home/agent/.claude \
+    CLAUDE_CONFIG_DIR=/home/agent/.claude
+
+USER agent
+CMD ["claude"]
 
 # ---------------------------------------------------------------------------
 # pi: profiles/pi/profile.sh
