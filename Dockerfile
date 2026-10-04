@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
-FROM node:24-bookworm-slim
 
-ARG PI_PACKAGE=@earendil-works/pi-coding-agent
-ARG PI_VERSION=1.0.1
+# Shared base: everything a harness needs except the harness itself. Each
+# harness is its own final stage, so one harness's dependencies never ship in
+# another's image. `docker build -t rapunzel .` builds the last stage, pi.
+FROM node:24-bookworm-slim AS base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -18,6 +19,31 @@ RUN apt-get update \
     # git's ownership check. /workspace is always the caller's own project.
     && git config --system --add safe.directory /workspace
 
+# The runtime UID is the caller's, not 1001, so HOME must be writable by any
+# UID (git config, npm and tool caches). Sticky like /tmp.
+RUN groupadd --gid 1001 agent \
+    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash agent \
+    && chmod 1777 /home/agent
+
+# Root-owned so the runtime user cannot modify the entrypoint or helpers.
+COPY --chmod=0755 bootstrap.sh /usr/local/bin/rapunzel-entrypoint
+COPY --chmod=0755 rapunzel-shell /usr/local/bin/rapunzel-shell
+# --chmod also applies to the directory COPY creates, so it must stay traversable.
+COPY --chmod=0755 setup-identity.sh verify-isolation-inner.sh /usr/local/lib/rapunzel/
+
+ENV HOME=/home/agent
+
+WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/rapunzel-entrypoint"]
+
+# ---------------------------------------------------------------------------
+# pi: profiles/pi/profile.sh
+# ---------------------------------------------------------------------------
+FROM base AS pi
+
+ARG PI_PACKAGE=@earendil-works/pi-coding-agent
+ARG PI_VERSION=1.0.1
+
 # Separate layer so pi upgrades do not re-run apt and vice versa. Pruning must
 # happen in this same layer, or the foreign-platform binaries stay in the image.
 RUN --mount=type=bind,source=lib/prune-foreign-platforms.mjs,target=/tmp/prune-foreign-platforms.mjs \
@@ -25,24 +51,16 @@ RUN --mount=type=bind,source=lib/prune-foreign-platforms.mjs,target=/tmp/prune-f
     npm install -g --ignore-scripts "${PI_PACKAGE}@${PI_VERSION}" \
     && node /tmp/prune-foreign-platforms.mjs "$(npm root -g)"
 
-# The runtime UID is the caller's, not 1001, so HOME must be writable by any
-# UID (git config, npm and tool caches). Sticky like /tmp.
-RUN groupadd --gid 1001 agent \
-    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash agent \
-    && mkdir -p /home/agent/.pi/agent \
+# /home/agent/.pi is mode 1777 because extensions write caches such as
+# ~/.pi/cache there as the caller's UID. The state directory is the volume mount.
+RUN mkdir -p /home/agent/.pi/agent \
     && chown -R agent:agent /home/agent/.pi \
-    && chmod 1777 /home/agent /home/agent/.pi
+    && chmod 1777 /home/agent/.pi
 
-# Root-owned so the runtime user cannot modify the entrypoint or helpers.
-COPY --chmod=0755 bootstrap.sh /usr/local/bin/rapunzel-entrypoint
-COPY --chmod=0755 rapunzel-shell /usr/local/bin/rapunzel-shell
-# --chmod also applies to the directory COPY creates, so it must stay traversable.
-COPY --chmod=0755 bootstrap-config.mjs setup-identity.sh verify-isolation-inner.sh /usr/local/lib/rapunzel/
+COPY --chmod=0755 profiles/pi/bootstrap.mjs /usr/local/lib/rapunzel/bootstrap-harness.mjs
 
-ENV HOME=/home/agent \
+ENV RAPUNZEL_STATE_DIR=/home/agent/.pi/agent \
     PI_CODING_AGENT_DIR=/home/agent/.pi/agent
 
-WORKDIR /workspace
 USER agent
-ENTRYPOINT ["/usr/local/bin/rapunzel-entrypoint"]
 CMD ["pi"]

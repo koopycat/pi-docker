@@ -13,8 +13,12 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 source "${SCRIPT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${SCRIPT_DIR}/lib/docker.sh"
+# shellcheck source=lib/profile.sh
+source "${SCRIPT_DIR}/lib/profile.sh"
 
-IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+# Extensions are a pi concept, so this tool always uses the pi profile.
+load_profile pi
+IMAGE=${RAPUNZEL_IMAGE:-$H_IMAGE}
 SOURCE=${RAPUNZEL_EXTENSIONS_DIR:-${HOME}/.pi-extensions}
 
 usage() {
@@ -46,7 +50,7 @@ else
         printf 'rapunzel-ext: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
         exit 1
     }
-    VOLUME=$(project_volume_name "$PROJECT_DIR")
+    VOLUME=$(project_volume_name "$PROJECT_DIR" "$H_NAME")
 fi
 
 require_docker rapunzel-ext
@@ -66,14 +70,14 @@ if [[ "$COMMAND" == list ]]; then
         exit 0
     fi
     docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy,readonly" \
+        --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy,readonly" \
         --entrypoint /bin/bash "$IMAGE" \
         -euo pipefail -c '
-            directory=/home/agent/.pi/agent/extensions
+            directory=$1/extensions
             if [[ -d "$directory" ]]; then
                 find "$directory" -mindepth 1 -maxdepth 1 -printf "%f\\n" | sort
             fi
-        '
+        ' -- "$H_STATE_DIR"
     exit 0
 fi
 
@@ -95,12 +99,12 @@ prepare_volume_owner
 
 docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop=ALL --security-opt=no-new-privileges \
     --mount "type=bind,src=${staging},dst=/source,readonly" \
-    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
+    --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
     --entrypoint /bin/bash "$IMAGE" \
     -euo pipefail -c '
-        destination=/home/agent/.pi/agent/extensions
+        destination=$1/extensions
         mkdir -p "$destination"
         cp -R --remove-destination --preserve=mode,timestamps /source/. "$destination/"
-    '
-printf 'Synced %s into %s (/home/agent/.pi/agent/extensions). Run /reload in pi to hot-reload.\n' \
-    "$SOURCE" "$VOLUME"
+    ' -- "$H_STATE_DIR"
+printf 'Synced %s into %s (%s/extensions). Run /reload in pi to hot-reload.\n' \
+    "$SOURCE" "$VOLUME" "$H_STATE_DIR"

@@ -22,6 +22,7 @@ jobs:
             lib/docker.sh \
             lib/egress.sh \
             lib/host-files.sh \
+            lib/profile.sh \
             lib/volumes.sh \
             rapunzel \
             rapunzel-ext \
@@ -31,11 +32,12 @@ jobs:
             verify-egress.sh \
             verify-host-files.sh \
             verify-isolation-inner.sh \
-            verify-isolation.sh
+            verify-isolation.sh \
+            profiles/pi/profile.sh
 
       - name: Validate Node scripts
         run: |
-          node --check bootstrap-config.mjs
+          node --check profiles/pi/bootstrap.mjs
           node --check lib/egress-probe.mjs
           node --check lib/prune-foreign-platforms.mjs
 

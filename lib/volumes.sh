@@ -17,12 +17,14 @@ project_hash() {
     fi
 }
 
-# Print the default per-project agent volume name for a canonical project path.
+# Print the default per-project volume name for a canonical project path and a
+# harness. Each harness gets its own volume, so state is never shared.
 project_volume_name() {
     : "${1:?project_volume_name requires a project path}"
+    : "${2:?project_volume_name requires a harness name}"
     local hash
     hash=$(project_hash "$1") || return 1
-    printf 'rapunzel-agent-%s' "$hash"
+    printf 'rapunzel-%s-%s' "$2" "$hash"
 }
 
 # Make the agent volume writable by the invoking host UID/GID.
@@ -36,11 +38,12 @@ project_volume_name() {
 # creates the volume on first use. Preparation is one short-lived container that
 # only reads a marker file once the volume is prepared for this exact owner.
 #
-# Requires IMAGE and VOLUME to be set. Must be invoked as a non-root user.
+# Requires IMAGE, VOLUME, and H_STATE_DIR (see lib/profile.sh) to be set. Must be invoked as a non-root user.
 
 prepare_volume_owner() {
     : "${IMAGE:?prepare_volume_owner requires IMAGE to be set}"
     : "${VOLUME:?prepare_volume_owner requires VOLUME to be set}"
+    : "${H_STATE_DIR:?prepare_volume_owner requires a loaded harness profile}"
 
     local uid gid
     uid=$(id -u)
@@ -60,14 +63,14 @@ prepare_volume_owner() {
         --cap-add=DAC_OVERRIDE \
         --security-opt=no-new-privileges \
         --entrypoint /bin/bash \
-        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
+        --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
         "$IMAGE" \
         -euo pipefail -c '
-            marker=/home/agent/.pi/agent/.owner-initialized
+            marker=$3/.owner-initialized
             [[ -f "$marker" && ! -L "$marker" && "$(<"$marker")" == "$1:$2" ]] && exit 0
-            chown -R "$1:$2" /home/agent/.pi/agent
+            chown -R "$1:$2" "$3"
             rm -f "$marker"
             printf "%s:%s\n" "$1" "$2" >"$marker"
             chown "$1:$2" "$marker"
-        ' -- "$uid" "$gid"
+        ' -- "$uid" "$gid" "$H_STATE_DIR"
 }

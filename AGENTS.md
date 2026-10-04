@@ -7,6 +7,7 @@ pi is the first and currently only harness; other harnesses (Claude Code, Codex 
 - `docker build -t rapunzel .`
 - `./rapunzel [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
 - `./rapunzel --shell [PROJECT_DIR]`
+- `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`; only `pi` exists so far)
 - `./rapunzel-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`
@@ -20,7 +21,8 @@ pi is the first and currently only harness; other harnesses (Claude Code, Codex 
 
 - The only host bind mount is the requested project at `/workspace`, plus read-only sub-mounts of its `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` (`lib/host-files.sh`). pi must stay able to commit; keep `./verify-host-files.sh` passing.
 - The image sets `safe.directory=/workspace` system-wide because Docker Desktop shows the mount root as owned by root.
-- Pi configuration and sessions live in the named Docker volume at `/home/agent/.pi/agent`.
+- Harness configuration and sessions live in a per-project, per-harness named Docker volume at the profile's `H_STATE_DIR` (pi: `/home/agent/.pi/agent`).
+- A profile (`profiles/<name>/profile.sh`) is data only: command, state directory, environment names. It never weakens a launcher control, and profiles come only from this repository, never from a user-supplied path.
 - Named volumes are created root-owned; `lib/volumes.sh` prepares ownership for the caller's UID/GID before every run (idempotent via a marker file). Do not add a Docker Desktop skip.
 - The container maps the caller's arbitrary UID/GID to the name `agent` via `setup-identity.sh` and libnss-wrapper, so it stays non-root without "I have no name!" prompts.
 - Only allowlisted environment names enter the container; `RAPUNZEL_ENV_FILE` is filtered through the same allowlist and `RAPUNZEL_API_KEY_VARIABLE` must name an allowed variable.

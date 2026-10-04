@@ -47,7 +47,7 @@ rapunzel . --continue
 ```
 
 The default image name is `rapunzel`.
-Each project gets its own default agent volume derived from its canonical path, such as `rapunzel-agent-<hash>`.
+Each project gets its own default agent volume derived from its canonical path, such as `rapunzel-pi-<hash>` (`rapunzel-<harness>-<hash>`).
 This keeps trust decisions, sessions, auth, and extensions separate between projects.
 Set `RAPUNZEL_VOLUME` only when deliberately opting into a shared volume:
 
@@ -132,7 +132,7 @@ Pi's runtime state is under `PI_CODING_AGENT_DIR`, set here to `/home/agent/.pi/
 - `models-store.json` - optional cached provider catalog data.
 
 The entrypoint creates the directories and bootstraps `settings.json` and `models.json` in the named volume.
-`bootstrap-config.mjs` is the single source of defaults for `settings.json`, including `defaultProjectTrust: "ask"`, `enableAnalytics: false`, `quietStartup: false`, and the volume-local session directory.
+`profiles/pi/bootstrap.mjs` is the single source of defaults for `settings.json`, including `defaultProjectTrust: "ask"`, `enableAnalytics: false`, `quietStartup: false`, and the volume-local session directory.
 It sets `sessionDir` to the volume-local `sessions` directory, so session data does not land in the project or host home.
 A provider is selected as a default only when its complete provider entry was written.
 
@@ -269,7 +269,7 @@ Replace the endpoint, model, and key with a real provider before running this te
 To verify that a session was persisted in the named volume without exposing it on the host:
 
 ```bash
-VOLUME=rapunzel-agent-<hash>
+VOLUME=rapunzel-pi-<hash>
 docker run --rm \
   --mount "type=volume,src=$VOLUME,dst=/data,readonly" \
   alpine:3.20 sh -c 'find /data/sessions -type f -name "*.jsonl" -print'
@@ -291,7 +291,7 @@ The named volumes persist across image updates.
 Back one up or delete it deliberately if you want to reset container-local settings and sessions:
 
 ```bash
-docker volume rm rapunzel-agent-<hash>
+docker volume rm rapunzel-pi-<hash>
 ```
 
 ## Skills and extensions

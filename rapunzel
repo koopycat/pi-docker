@@ -17,25 +17,29 @@ source "${SCRIPT_DIR}/lib/docker.sh"
 source "${SCRIPT_DIR}/lib/egress.sh"
 # shellcheck source=lib/host-files.sh
 source "${SCRIPT_DIR}/lib/host-files.sh"
+# shellcheck source=lib/profile.sh
+source "${SCRIPT_DIR}/lib/profile.sh"
 
 usage() {
     cat >&2 <<'EOF'
-Usage: rapunzel [--shell] [PROJECT_DIR [pi arguments...]]
-       rapunzel --exec PROJECT_DIR COMMAND [ARGS...]
+Usage: rapunzel [--harness NAME] [--shell] [PROJECT_DIR [harness arguments...]]
+       rapunzel [--harness NAME] --exec PROJECT_DIR COMMAND [ARGS...]
 
-PROJECT_DIR defaults to the current directory. Pi arguments need an explicit
-PROJECT_DIR in front of them, for example: rapunzel . --continue
+PROJECT_DIR defaults to the current directory. Harness arguments need an
+explicit PROJECT_DIR in front of them, for example: rapunzel . --continue
 
 Build the image first with:
   docker build -t rapunzel .
 
 Options:
+  --harness NAME          Harness profile to run (default: pi, see profiles/)
   --shell                 Open an interactive bash with the same mounts and env.
-  --exec                  Run COMMAND instead of pi, with the same mounts and env.
+  --exec                  Run COMMAND instead of the harness, with the same mounts and env.
   -h, --help              Show this help.
 
 Environment:
-  RAPUNZEL_IMAGE          Image name (default: rapunzel)
+  RAPUNZEL_HARNESS        Harness profile (default: pi)
+  RAPUNZEL_IMAGE          Image name (default: the profile's image)
   RAPUNZEL_VOLUME         Agent volume (default: per-project volume)
   RAPUNZEL_ENV_FILE       Optional Docker env-file containing runtime secrets
   RAPUNZEL_NETWORK        Docker network mode (default: bridge)
@@ -52,6 +56,14 @@ Environment:
 EOF
     exit "${1:-2}"
 }
+
+HARNESS=${RAPUNZEL_HARNESS:-pi}
+if [[ "${1:-}" == --harness ]]; then
+    [[ $# -ge 2 ]] || usage
+    HARNESS=$2
+    shift 2
+fi
+load_profile "$HARNESS" || exit 2
 
 SHELL_MODE=false
 EXEC_MODE=false
@@ -76,19 +88,19 @@ fi
 if [[ ! -d "$PROJECT_INPUT" ]]; then
     printf 'rapunzel: project directory does not exist: %s\n' "$PROJECT_INPUT" >&2
     if [[ "$PROJECT_INPUT" == -* ]]; then
-        printf 'rapunzel: put the project directory before pi arguments, for example: rapunzel . %s\n' \
+        printf 'rapunzel: put the project directory before harness arguments, for example: rapunzel . %s\n' \
             "$PROJECT_INPUT" >&2
     fi
     exit 1
 fi
 if [[ "$SHELL_MODE" == true && $# -gt 0 ]]; then
-    printf 'rapunzel: --shell does not accept pi arguments\n' >&2
+    printf 'rapunzel: --shell does not accept harness arguments\n' >&2
     exit 2
 fi
 PROJECT_DIR=$(cd -- "$PROJECT_INPUT" && pwd -P)
 
-IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
-VOLUME=${RAPUNZEL_VOLUME:-$(project_volume_name "$PROJECT_DIR")}
+IMAGE=${RAPUNZEL_IMAGE:-$H_IMAGE}
+VOLUME=${RAPUNZEL_VOLUME:-$(project_volume_name "$PROJECT_DIR" "$H_NAME")}
 NETWORK=${RAPUNZEL_NETWORK:-bridge}
 EGRESS=${RAPUNZEL_EGRESS:-open}
 if [[ -n "${RAPUNZEL_EGRESS_ALLOW_PRIVATE:-}" && "$EGRESS" != allowlist ]]; then
@@ -115,7 +127,7 @@ esac
 RUNTIME_UID=$(id -u)
 RUNTIME_GID=$(id -g)
 if [[ "$RUNTIME_UID" == 0 ]]; then
-    printf 'rapunzel: refusing to run pi as root; invoke it as a non-root user\n' >&2
+    printf 'rapunzel: refusing to run %s as root; invoke it as a non-root user\n' "$H_NAME" >&2
     exit 1
 fi
 
@@ -173,11 +185,12 @@ args=(
     --security-opt=no-new-privileges
     --cap-drop=ALL
     --mount "type=bind,src=${PROJECT_DIR},dst=/workspace"
-    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy"
+    --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy"
     --env HOME=/home/agent
-    --env PI_CODING_AGENT_DIR=/home/agent/.pi/agent
+    --env "RAPUNZEL_STATE_DIR=${H_STATE_DIR}"
+    --env "${H_STATE_ENV}=${H_STATE_DIR}"
 )
-# Git config and hooks stay read-only, so pi can commit but cannot plant
+# Git config and hooks stay read-only, so the harness can commit but cannot plant
 # anything the host's git would run.
 host_files_mounts "$PROJECT_DIR"
 args+=(${HOST_FILE_MOUNTS[@]+"${HOST_FILE_MOUNTS[@]}"})
@@ -185,12 +198,13 @@ args+=(${HOST_FILE_MOUNTS[@]+"${HOST_FILE_MOUNTS[@]}"})
 # Runtime environment policy: only allowlisted names may enter the container.
 # This stops a mistaken or untrusted env file from injecting loader/interpreter
 # hooks (LD_PRELOAD, BASH_ENV, NODE_OPTIONS) or overriding container paths.
+# Shared names are the provider keys and proxy settings; the profile adds its
+# own (lib/profile.sh, profiles/<name>/profile.sh).
+offline_env_names=()
+for pair in ${H_OFFLINE_ENV[@]+"${H_OFFLINE_ENV[@]}"}; do
+    offline_env_names+=("${pair%%=*}")
+done
 env_allowlist=(
-    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
-    RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL RAPUNZEL_API RAPUNZEL_API_KEY
-    RAPUNZEL_API_KEY_VARIABLE RAPUNZEL_REASONING RAPUNZEL_CONTEXT_WINDOW
-    RAPUNZEL_MAX_TOKENS RAPUNZEL_COMPAT_JSON RAPUNZEL_HEADERS_JSON
-    RAPUNZEL_AUTH_HEADER
     ANTHROPIC_API_KEY OPENAI_API_KEY DEEPSEEK_API_KEY GEMINI_API_KEY
     OPENROUTER_API_KEY XAI_API_KEY GROQ_API_KEY MISTRAL_API_KEY
     CEREBRAS_API_KEY NVIDIA_API_KEY TOGETHER_API_KEY FIREWORKS_API_KEY
@@ -198,22 +212,17 @@ env_allowlist=(
     AI_GATEWAY_API_KEY KIMI_API_KEY MINIMAX_API_KEY MINIMAX_CN_API_KEY
     RADIUS_API_KEY HF_TOKEN BASETEN_API_KEY OPENCODE_API_KEY
     QWEN_TOKEN_PLAN_API_KEY QWEN_TOKEN_PLAN_CN_API_KEY
-    HTTP_PROXY HTTPS_PROXY NO_PROXY PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY
-    PI_CACHE_RETENTION
+    HTTP_PROXY HTTPS_PROXY NO_PROXY
+    ${H_ENV_ALLOW[@]+"${H_ENV_ALLOW[@]}"}
 )
 # In strict mode the agent gets only non-secret provider settings; the
 # credentials and upstream URL go to the gateway instead.
-gateway_agent_allowlist=(
-    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
-    RAPUNZEL_API RAPUNZEL_REASONING RAPUNZEL_CONTEXT_WINDOW
-    RAPUNZEL_MAX_TOKENS RAPUNZEL_COMPAT_JSON RAPUNZEL_AUTH_HEADER
-    PI_CACHE_RETENTION
-)
+gateway_agent_allowlist=(${H_ENV_ALLOW_GATEWAY[@]+"${H_ENV_ALLOW_GATEWAY[@]}"})
 env_denylist=(
     BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT NODE_OPTIONS
     PYTHONSTARTUP PERL5OPT RUBYOPT
-    HOME PATH TMPDIR
-    PI_CODING_AGENT_DIR PI_CODING_AGENT_SESSION_DIR
+    HOME PATH TMPDIR RAPUNZEL_STATE_DIR "$H_STATE_ENV"
+    ${H_ENV_DENY[@]+"${H_ENV_DENY[@]}"}
 )
 
 env_name_is_valid() { [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; }
@@ -262,11 +271,11 @@ if [[ -n "$base_url_variable" ]] && { ! env_name_is_valid "$base_url_variable" |
     exit 2
 fi
 
-# Names the strict gateway reads; they are expected in the env and never reach pi.
+# Names the strict gateway reads; they are expected in the env and never reach the harness.
 gateway_consumed=(
     ANTHROPIC_API_KEY OPENAI_API_KEY RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL
     RAPUNZEL_API_KEY_VARIABLE "${key_variable:-RAPUNZEL_API_KEY}"
-    PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY
+    ${offline_env_names[@]+"${offline_env_names[@]}"}
 )
 name_in_list() {
     local candidate=$1 name
@@ -287,7 +296,7 @@ runtime_value() {
     fi
 }
 # Settings the egress modes manage themselves.
-egress_managed=(HTTP_PROXY HTTPS_PROXY NO_PROXY PI_OFFLINE PI_SKIP_VERSION_CHECK PI_TELEMETRY)
+egress_managed=(HTTP_PROXY HTTPS_PROXY NO_PROXY ${offline_env_names[@]+"${offline_env_names[@]}"})
 if [[ "$EGRESS" == allowlist ]]; then
     kept=()
     for name in "${env_allowlist[@]}"; do
@@ -410,8 +419,10 @@ if [[ "$EGRESS" != open ]]; then
             base_url_value="${GATEWAY_URL}/custom"
         fi
     fi
-    # pi.dev is not reachable from either mode; skip those requests.
-    args+=(--env PI_OFFLINE=1 --env PI_SKIP_VERSION_CHECK=1 --env PI_TELEMETRY=0)
+    # Vendor update and telemetry hosts are not reachable from either mode.
+    for pair in ${H_OFFLINE_ENV[@]+"${H_OFFLINE_ENV[@]}"}; do
+        args+=(--env "$pair")
+    done
     NETWORK=$EGRESS_NETWORK
 fi
 if [[ -n "$base_url_variable" ]]; then
@@ -419,7 +430,7 @@ if [[ -n "$base_url_variable" ]]; then
 fi
 args+=(--network "$NETWORK")
 
-# Changes to host-executed files are reported when pi exits.
+# Changes to host-executed files are reported when the harness exits.
 host_files_before=$(mktemp "${TMPDIR:-/tmp}/rapunzel-files.XXXXXX")
 host_files_snapshot "$PROJECT_DIR" "$host_files_before"
 
@@ -443,4 +454,4 @@ if [[ "$EXEC_MODE" == true ]]; then
     exit
 fi
 
-docker "${args[@]}" "$IMAGE" pi "$@"
+docker "${args[@]}" "$IMAGE" "$H_CMD" "$@"

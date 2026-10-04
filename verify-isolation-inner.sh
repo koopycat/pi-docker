@@ -8,9 +8,10 @@ fail() {
 
 [[ "$(id -u)" != 0 ]] || fail "container process is root"
 [[ -d /workspace ]] || fail "/workspace is missing"
-[[ -d /home/agent/.pi/agent ]] || fail "container-local pi agent directory is missing"
+state_dir=${RAPUNZEL_STATE_DIR:?RAPUNZEL_STATE_DIR is not set}
+[[ -d "$state_dir" ]] || fail "container-local harness state directory is missing"
 [[ -w /workspace ]] || fail "/workspace is not writable"
-[[ -w /home/agent/.pi/agent ]] || fail "agent volume is not writable"
+[[ -w "$state_dir" ]] || fail "agent volume is not writable"
 
 probe="/workspace/.rapunzel-isolation-$$"
 printf 'ok\n' >"$probe"
@@ -34,10 +35,10 @@ fi
 # project or home path may appear as an additional bind mount.
 mount_targets=$(awk '{print $5}' /proc/self/mountinfo)
 grep -qx '/workspace' <<<"$mount_targets" || fail "/workspace mount is missing"
-grep -qx '/home/agent/.pi/agent' <<<"$mount_targets" || fail "agent volume mount is missing"
+grep -qxF "$state_dir" <<<"$mount_targets" || fail "agent volume mount is missing"
 
 # Remove the two intentional mounts before looking for host-like paths.
-unexpected_mounts=$(awk '$5 != "/workspace" && $5 != "/home/agent/.pi/agent" {print $5}' <<<"$mount_targets")
+unexpected_mounts=$(awk -v state="$state_dir" '$5 != "/workspace" && $5 != state {print $5}' <<<"$mount_targets")
 host_mounts=$(grep -E '^/(Users|Volumes|private|home/[^/]+/\.pi|home/[^/]+/\.ssh)(/|$)' <<<"$unexpected_mounts" || true)
 [[ -z "$host_mounts" ]] || fail "host home-related mount is visible"
 

@@ -63,7 +63,7 @@ This project was called pi-docker. The rename is breaking, and the old names no 
 - The launcher is `rapunzel` instead of `pi-project`, and `rapunzel-ext` replaces `pi-ext`.
 - Environment variables use the prefix `RAPUNZEL_` instead of `PI_DOCKER_`, and `RAPUNZEL_EXTENSIONS_DIR` replaces `PI_EXTENSIONS_DIR`.
 - The local image is `rapunzel` instead of `pi-project-sandbox`, and the published image is `ghcr.io/koopycat/rapunzel` instead of `ghcr.io/koopycat/pi-docker`.
-- Per-project volumes are named `rapunzel-agent-<hash>`. Existing `pi-project-agent-*` volumes are not reused, so each project starts with fresh settings, logins, and sessions. Remove the old volumes with `docker volume rm` once you no longer need them.
+- Per-project volumes are named `rapunzel-<harness>-<hash>`, for example `rapunzel-pi-<hash>`. Existing `pi-project-agent-*` volumes are not reused, so each project starts with fresh settings, logins, and sessions. Remove the old volumes with `docker volume rm` once you no longer need them.
 - Inside the container, the user is `agent` and `HOME` is `/home/agent`.
 
 ## More

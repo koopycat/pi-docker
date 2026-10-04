@@ -14,8 +14,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 source "${SCRIPT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${SCRIPT_DIR}/lib/docker.sh"
+# shellcheck source=lib/profile.sh
+source "${SCRIPT_DIR}/lib/profile.sh"
 
-IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+load_profile "${RAPUNZEL_HARNESS:-pi}"
+IMAGE=${RAPUNZEL_IMAGE:-$H_IMAGE}
 VOLUME=${RAPUNZEL_VOLUME:-rapunzel-test}
 
 [[ "$(id -u)" != 0 ]] || {
@@ -37,7 +40,7 @@ run() {
         --network none \
         --cap-drop=ALL \
         --security-opt=no-new-privileges \
-        --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
+        --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
         "$IMAGE" \
         "$@"
 }

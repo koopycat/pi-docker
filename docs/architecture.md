@@ -81,7 +81,7 @@ flowchart LR
 |---|---|---|
 | `rapunzel` | Launcher on the host. Builds the `docker run` command, filters the environment, sets up egress, reports host-file changes, resets the terminal. | `rapunzel`, `lib/*.sh` |
 | Image | Debian slim with Node 24, git, ripgrep, and the pi harness. Built from this repository and published to `ghcr.io/koopycat/rapunzel`. | `Dockerfile` |
-| Entrypoint | Maps the caller's UID to the name `agent`, writes pi's configuration, then runs the requested command. | `bootstrap.sh`, `setup-identity.sh`, `bootstrap-config.mjs` |
+| Entrypoint | Maps the caller's UID to the name `agent`, writes pi's configuration, then runs the requested command. | `bootstrap.sh`, `setup-identity.sh`, `profiles/<harness>/bootstrap.mjs` |
 | Agent volume | Docker named volume per project, mounted at `/home/agent/.pi/agent`. | `lib/volumes.sh` |
 | Egress sidecar | Pipelock (allowlist mode) or Caddy (strict mode), created per run. | `lib/egress.sh` |
 | `rapunzel-ext` | Copies curated extensions from the host into a project's volume. | `rapunzel-ext` |
@@ -127,7 +127,7 @@ The image also marks `/workspace` as a safe git directory, because Docker Deskto
 
 ### 4.3 Agent state and configuration
 
-Each project gets its own volume, named `rapunzel-agent-` plus the first 12 hex digits of the SHA-256 of its canonical path.
+Each project gets its own volume, named `rapunzel-<harness>-` plus the first 12 hex digits of the SHA-256 of its canonical path.
 Settings, `/login` credentials, sessions, trust decisions, and installed extensions therefore never mix between projects.
 
 A new volume is owned by root.
@@ -309,8 +309,9 @@ The [guide](guide.md) explains each setting with examples.
 | `lib/egress.sh` | Per-run networks, Pipelock and Caddy sidecars, allowlist construction. |
 | `lib/host-files.sh` | Read-only git mounts, snapshots, and the change report. |
 | `lib/docker.sh` | Docker reachability check. |
-| `Dockerfile` | Image: base, packages, pi installation, writable home. |
-| `bootstrap.sh`, `setup-identity.sh`, `bootstrap-config.mjs` | Entrypoint: identity, pi configuration. |
+| `Dockerfile` | Image: shared base stage, then one final stage per harness (pi is the default). |
+| `bootstrap.sh`, `setup-identity.sh` | Entrypoint: identity, then the harness's bootstrap script. |
+| `profiles/<harness>/profile.sh`, `profiles/<harness>/bootstrap.mjs`, `lib/profile.sh` | Harness profile: command, state directory, environment names, bootstrap. Data only; the launcher enforces everything. |
 | `rapunzel-ext` | Curated extensions from the host into a project's volume. |
 | `test.sh`, `verify-isolation.sh`, `verify-host-files.sh`, `verify-egress.sh`, `lib/egress-probe.mjs` | Checks. |
 | `docs/egress.md` | Egress decision records and evidence. |

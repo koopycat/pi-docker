@@ -13,7 +13,10 @@ ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 source "${ROOT_DIR}/lib/volumes.sh"
 # shellcheck source=lib/docker.sh
 source "${ROOT_DIR}/lib/docker.sh"
-IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+# shellcheck source=lib/profile.sh
+SCRIPT_DIR=$ROOT_DIR source "${ROOT_DIR}/lib/profile.sh"
+load_profile "${RAPUNZEL_HARNESS:-pi}"
+IMAGE=${RAPUNZEL_IMAGE:-$H_IMAGE}
 VOLUME=${RAPUNZEL_VOLUME:-rapunzel-verify}
 PROJECT_DIR=${1:-$ROOT_DIR}
 
@@ -48,9 +51,10 @@ docker run --rm \
     --cap-drop=ALL \
     --security-opt=no-new-privileges \
     --mount "type=bind,src=${PROJECT_DIR},dst=/workspace" \
-    --mount "type=volume,src=${VOLUME},dst=/home/agent/.pi/agent,volume-nocopy" \
+    --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
     --env HOME=/home/agent \
-    --env PI_CODING_AGENT_DIR=/home/agent/.pi/agent \
+    --env "RAPUNZEL_STATE_DIR=${H_STATE_DIR}" \
+    --env "${H_STATE_ENV}=${H_STATE_DIR}" \
     --env HOST_HOME_PATH="$HOST_HOME" \
     "$IMAGE" \
     /usr/local/lib/rapunzel/verify-isolation-inner.sh
