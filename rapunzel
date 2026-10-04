@@ -349,7 +349,10 @@ if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
             printf '%s=%s\n' "$name" "$value" >>"$filtered_env"
         elif [[ "$EGRESS" == strict ]] && name_in_list "$name" "${gateway_consumed[@]}"; then
             continue
-        elif [[ "$name" == RAPUNZEL_BASE_URL_VARIABLE ]]; then
+        elif name_in_list "$name" RAPUNZEL_BASE_URL_VARIABLE RAPUNZEL_API_KEY_VARIABLE \
+            RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL; then
+            # Read by the launcher itself (egress hosts, key and URL variables),
+            # so not "dropped" when the harness does not take them.
             continue
         else
             dropped+=("$name")
