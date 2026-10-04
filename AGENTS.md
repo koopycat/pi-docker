@@ -13,6 +13,9 @@
 
 ## Invariants
 
+`docs/architecture.md` describes the design these invariants protect; keep it current when they change.
+
+
 - The only host bind mount is the requested project at `/workspace`, plus read-only sub-mounts of its `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` (`lib/host-files.sh`). pi must stay able to commit; keep `./verify-host-files.sh` passing.
 - The image sets `safe.directory=/workspace` system-wide because Docker Desktop shows the mount root as owned by root.
 - Pi configuration and sessions live in the named Docker volume at `/home/pi/.pi/agent`.

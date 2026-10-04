@@ -1,6 +1,6 @@
 # Detailed Guide
 
-This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md).
+This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md); for how and why it works, see the [architecture](architecture.md).
 
 The design follows pi's official [Plain Docker](https://github.com/earendil-works/pi-mono/blob/main/packages/coding-agent/docs/containerization.md) pattern, while adding a non-root runtime user, an isolated named volume, runtime provider configuration, and an isolation check.
 

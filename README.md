@@ -48,12 +48,13 @@ Set a provider key in your environment before launching Pi. The runner passes su
 - The selected project is the only host directory mounted into a normal Pi run. Its git config and hooks are read-only, and `pi-project` reports changes to files the host runs on its own, such as `.envrc` or editor tasks. The host home directory, `~/.pi`, and `~/.ssh` are not mounted.
 - Pi runs as your numeric user and group, without root privileges or Linux capabilities.
 - Only supported runtime variables are passed into the container, rather than the full host environment.
-- With `PI_DOCKER_EGRESS=allowlist`, Pi reaches only allowlisted hosts through an SNI-checking proxy. `PI_DOCKER_EGRESS=strict` also keeps provider keys out of the container. See [egress control](docs/guide.md#egress-control) and its [architecture and decisions](docs/egress.md).
+- With `PI_DOCKER_EGRESS=allowlist`, Pi reaches only allowlisted hosts through an SNI-checking proxy. `PI_DOCKER_EGRESS=strict` also keeps provider keys out of the container. See [egress control](docs/guide.md#egress-control) and its [design decisions](docs/egress.md).
 
 Pi can read and modify files in the mounted project, including project-local agent resources. It can also read any credentials you pass to it. Docker networking defaults to `bridge`; use `PI_DOCKER_NETWORK=none` for offline runs. See the [isolation guide](docs/guide.md#isolation-properties) for the full boundary and limitations.
 
 ## More
 
+- [Architecture](docs/architecture.md): goals, threat model, design, verification, and residual risks
 - [Configuration, storage, and provider options](docs/guide.md#provider-configuration)
 - [Shell mode and extension management](docs/guide.md#skills-and-extensions)
 - [Isolation checks](docs/guide.md#verify-isolation)
