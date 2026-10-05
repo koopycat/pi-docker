@@ -9,10 +9,11 @@ Each harness is a profile in `profiles/<name>/` with its own image and its own p
 | Claude Code | `claude` | `rapunzel:claude` | `/home/agent/.claude` | `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` from the host's `claude setup-token` | `open`, `allowlist` |
 | Codex CLI | `codex` | `rapunzel:codex` | `/home/agent/.codex` | `OPENAI_API_KEY`/`CODEX_API_KEY`, or a ChatGPT login inside the sandbox | `open`, `allowlist` |
 | DeepSeek Harness | `dsh` | `rapunzel:dsh` | `/home/agent/.dsh` | `DEEPSEEK_API_KEY` | web UI: `open`; headless: `open`, `allowlist` |
+| opencode | `opencode` | `rapunzel:opencode` | `/home/agent/.opencode-state` | provider keys, `OPENCODE_API_KEY` (Zen), or `opencode auth login` inside the sandbox | `open`, `allowlist` |
 
 Copilot CLI is planned.
 Most of this guide describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
-[Claude Code](#claude-code), [Codex CLI](#codex-cli), and [DeepSeek Harness](#deepseek-harness) have their own sections; the isolation, host-file, and egress controls are the same for every harness.
+[Claude Code](#claude-code), [Codex CLI](#codex-cli), [DeepSeek Harness](#deepseek-harness), and [opencode](#opencode) have their own sections; the isolation, host-file, and egress controls are the same for every harness.
 
 This guide covers configuration, storage, isolation, extensions, and troubleshooting. For the quick start, see the [project README](../README.md); for how and why it works, see the [architecture](architecture.md).
 
@@ -57,7 +58,7 @@ rapunzel --harness codex . resume --last
 ```
 
 `--harness` comes before every other argument.
-The links `rapunzel-claude`, `rapunzel-codex`, and `rapunzel-dsh` in this checkout select their harness by name (`rapunzel-claude .` is `rapunzel --harness claude .`); a link you make yourself, such as `ln -s ~/src/rapunzel/rapunzel ~/bin/rapunzel-codex`, works the same way.
+The links `rapunzel-claude`, `rapunzel-codex`, `rapunzel-dsh`, and `rapunzel-opencode` in this checkout select their harness by name (`rapunzel-claude .` is `rapunzel --harness claude .`); a link you make yourself, such as `ln -s ~/src/rapunzel/rapunzel ~/bin/rapunzel-codex`, works the same way.
 When the harness image has not been built, `rapunzel` prints the `docker build` command instead of letting Docker look for it on Docker Hub.
 
 Without `RAPUNZEL_ENV_FILE`, the launcher loads `${XDG_CONFIG_HOME:-~/.config}/rapunzel/<harness>.env` when that file exists, for example `claude.env` with a `CLAUDE_CODE_OAUTH_TOKEN` or `pi.env` with provider keys, and says so on startup.
@@ -257,6 +258,40 @@ Egress:
 - `allowlist` always allows `api.deepseek.com`. dsh honors `HTTPS_PROXY` for its own requests and for the child processes it starts. Add sites for its `web_fetch` tool with `RAPUNZEL_EGRESS_ALLOW`.
 - `strict` is refused until a gateway route for DeepSeek's API is tested.
 
+## opencode
+
+`rapunzel --harness opencode` (or `rapunzel-opencode`) runs [opencode](https://opencode.ai) in the `rapunzel:opencode` image.
+opencode has no single home variable, so the image points `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` at `config/`, `data/`, `state/`, and `cache/` in the volume (`/home/agent/.opencode-state`).
+The volume therefore holds `opencode.json`, `auth.json`, the session database, logs, and the plugin and language-server caches.
+The volume is not `~/.opencode`, because opencode loads that directory as a second global config directory.
+Other XDG-aware tools in the container keep their config and caches in the volume too.
+The host `~/.config/opencode` and `~/.local/share/opencode` are never mounted or copied.
+
+```bash
+rapunzel-opencode                                   # terminal UI
+rapunzel-opencode . --continue                      # resume the last session
+rapunzel-opencode --exec . opencode run "run the tests"
+```
+
+Credentials:
+
+- **API keys.** Any key in the shared list that opencode reads, such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_API_KEY` for opencode Zen.
+- **Logins.** `rapunzel-opencode --exec . opencode auth login` stores the login in `auth.json` in the volume.
+
+`OPENCODE_CONFIG_CONTENT` passes inline config from the host, such as `{"model":"anthropic/claude-sonnet-5-5"}`, without editing the volume.
+`XDG_*`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_DB` cannot be set from the host.
+The image sets `OPENCODE_DISABLE_AUTOUPDATE=1`, because the root-owned install cannot be updated in place.
+
+opencode has no sandbox of its own, and by default its `build` agent runs tools without asking. It asks only for paths outside the project, `.env` reads, and repeated identical calls.
+The container is the boundary.
+To get approval prompts, set `OPENCODE_PERMISSION`, for example `OPENCODE_PERMISSION='{"bash":"ask","edit":"ask"}'`.
+The project's `opencode.json` and `.opencode/` are in the [host-file report](#files-the-host-runs), because a plugin or MCP command there would run with the host's opencode.
+
+Egress:
+
+- `allowlist` adds `api.anthropic.com` and `api.openai.com` through their keys; allow any other provider's API host with `RAPUNZEL_EGRESS_ALLOW` (opencode Zen: `opencode.ai`). opencode honors `HTTPS_PROXY`. A login needs its sign-in hosts too, through `RAPUNZEL_EGRESS_LOGINS` or `RAPUNZEL_EGRESS_ALLOW`. In the restricted modes, `OPENCODE_DISABLE_MODELS_FETCH=1` keeps opencode on its bundled model catalog instead of fetching models.dev, and `OPENCODE_DISABLE_LSP_DOWNLOAD=1` stops language-server downloads that would fail.
+- `strict` is refused until opencode's providers are tested against the gateway routes.
+
 ## Isolation properties
 
 Each normal `rapunzel` run has exactly these intentional host mounts:
@@ -277,7 +312,7 @@ The runtime uses a caller-mapped non-root UID, drops all Linux capabilities, and
 The following are deliberately not mounted or copied:
 
 - The host home directory.
-- The host `~/.pi` or `~/.pi/agent`, `~/.claude` or `~/.claude.json`, and `~/.codex`.
+- The host `~/.pi` or `~/.pi/agent`, `~/.claude` or `~/.claude.json`, `~/.codex`, `~/.dsh`, and opencode's `~/.config/opencode` and `~/.local/share/opencode`.
 - The host `~/.ssh`.
 - Host shell configuration, npm configuration, credentials, sessions, or arbitrary environment variables.
 
@@ -305,7 +340,7 @@ A planted file like that runs outside the container the next time you use git, e
     modified: package.json
   ```
 
-  The list covers `.envrc`; `.vscode` tasks, settings, and launch files; `.devcontainer`; CI workflows; pre-commit and husky hooks; agent settings (`.claude`, `.mcp.json`, `.cursor`); `package.json` and package-manager config; `Makefile` and `justfile`; Nix and devenv files; `mise.toml`; `.gitattributes` and `.gitmodules`; and git internals that are not read-only (`.git/info`, `.git/commondir`, `.git/worktrees`, alternates, and submodule config and hooks).
+  The list covers `.envrc`; `.vscode` tasks, settings, and launch files; `.devcontainer`; CI workflows; pre-commit and husky hooks; agent settings (`.claude`, `.mcp.json`, `.cursor`, and opencode's `opencode.json` and `.opencode`, whose plugins run on the host); `package.json` and package-manager config; `Makefile` and `justfile`; Nix and devenv files; `mise.toml`; `.gitattributes` and `.gitmodules`; and git internals that are not read-only (`.git/info`, `.git/commondir`, `.git/worktrees`, alternates, and submodule config and hooks).
 
 This is detection, not prevention, for everything except git config and hooks.
 Review reported files before running anything on the host.
@@ -404,14 +439,14 @@ Rebuild with a deliberate version change:
 docker build --pull --build-arg PI_VERSION=1.0.2 -t rapunzel .
 ```
 
-The other harnesses pin their versions the same way, with `CLAUDE_VERSION`, `CODEX_VERSION`, and `DSH_VERSION` (see the `ARG` lines in the `Dockerfile` for the current pins; Renovate proposes updates weekly):
+The other harnesses pin their versions the same way, with `CLAUDE_VERSION`, `CODEX_VERSION`, `DSH_VERSION`, and `OPENCODE_VERSION` (see the `ARG` lines in the `Dockerfile` for the current pins; Renovate proposes updates weekly):
 
 ```bash
 docker build --pull --target claude --build-arg CLAUDE_VERSION=<version> -t rapunzel:claude .
 docker build --pull --target codex --build-arg CODEX_VERSION=<version> -t rapunzel:codex .
 ```
 
-Their auto-updaters cannot write the root-owned install (Codex's update check is off, and Claude Code's updater is off in the restricted egress modes), so update by rebuilding.
+Their auto-updaters cannot write the root-owned install (Codex's update check and opencode's auto-update are off, and Claude Code's updater is off in the restricted egress modes), so update by rebuilding.
 
 The named volumes persist across image updates.
 Back one up or delete it deliberately if you want to reset container-local settings and sessions:

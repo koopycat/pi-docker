@@ -218,8 +218,8 @@ args=(
     --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy"
     --env HOME=/home/agent
     --env "RAPUNZEL_STATE_DIR=${H_STATE_DIR}"
-    --env "${H_STATE_ENV}=${H_STATE_DIR}"
 )
+[[ -z "$H_STATE_ENV" ]] || args+=(--env "${H_STATE_ENV}=${H_STATE_DIR}")
 # Show the host's local time instead of UTC. TZ is not secret, so it is set in
 # every egress mode; the name is checked so it cannot carry anything else.
 host_tz=${TZ:-}
@@ -261,7 +261,7 @@ gateway_agent_allowlist=(${H_ENV_ALLOW_GATEWAY[@]+"${H_ENV_ALLOW_GATEWAY[@]}"})
 env_denylist=(
     BASH_ENV ENV LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT NODE_OPTIONS
     PYTHONSTARTUP PERL5OPT RUBYOPT
-    HOME PATH TMPDIR RAPUNZEL_STATE_DIR "$H_STATE_ENV"
+    HOME PATH TMPDIR RAPUNZEL_STATE_DIR ${H_STATE_ENV:+"$H_STATE_ENV"}
     ${H_ENV_DENY[@]+"${H_ENV_DENY[@]}"}
 )
 

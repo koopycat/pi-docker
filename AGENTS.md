@@ -1,13 +1,13 @@
 # rapunzel: Docker sandbox for coding-agent harnesses
 
-pi is the default harness; Claude Code, Codex CLI, and DeepSeek Harness (dsh) are further profiles, and Copilot CLI is planned.
+pi is the default harness; Claude Code, Codex CLI, DeepSeek Harness (dsh), and opencode are further profiles, and Copilot CLI is planned.
 
 ## Commands
 
 - `docker build -t rapunzel .`
 - `./rapunzel [PROJECT_DIR [pi arguments...]]` (PROJECT_DIR defaults to the current directory)
 - `./rapunzel --shell [PROJECT_DIR]`
-- `./rapunzel-NAME ...` (links for claude, codex, dsh) or `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`, `dsh`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
+- `./rapunzel-NAME ...` (links for claude, codex, dsh, opencode) or `./rapunzel --harness NAME ...` (profiles live in `profiles/NAME/`: `pi`, `claude`, `codex`, `dsh`, `opencode`; build a non-default image with `docker build --target NAME -t rapunzel:NAME .`)
 - `./rapunzel-ext sync|list [PROJECT_DIR]`
 - `./test.sh`
 - `./verify-isolation.sh [project-directory]`
@@ -21,7 +21,7 @@ pi is the default harness; Claude Code, Codex CLI, and DeepSeek Harness (dsh) ar
 
 - The only host bind mount is the requested project at `/workspace`, plus read-only sub-mounts of its `.git/config`, `.git/hooks`, and an in-project `core.hooksPath` (`lib/host-files.sh`). pi must stay able to commit; keep `./verify-host-files.sh` passing.
 - The image sets `safe.directory=/workspace` system-wide because Docker Desktop shows the mount root as owned by root.
-- Harness configuration and sessions live in a per-project, per-harness named Docker volume at the profile's `H_STATE_DIR` (pi: `/home/agent/.pi/agent`).
+- Harness configuration and sessions live in a per-project, per-harness named Docker volume at the profile's `H_STATE_DIR` (pi: `/home/agent/.pi/agent`). A harness without a single home variable (opencode) leaves `H_STATE_ENV` empty, and its image points the harness's XDG directories into `H_STATE_DIR`.
 - A profile (`profiles/<name>/profile.sh`) is data only: command, state directory, environment names. It never weakens a launcher control, and profiles come only from this repository, never from a user-supplied path.
 - Named volumes are created root-owned; `lib/volumes.sh` prepares ownership for the caller's UID/GID before every run (idempotent via a marker file). Do not add a Docker Desktop skip.
 - The container maps the caller's arbitrary UID/GID to the name `agent` via `setup-identity.sh` and libnss-wrapper, so it stays non-root without "I have no name!" prompts.

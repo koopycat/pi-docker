@@ -89,7 +89,7 @@ jobs:
       - name: Build and smoke-test the other harness images
         if: steps.harness.outputs.changed == 'true'
         run: |
-          for harness in claude codex dsh; do
+          for harness in claude codex dsh opencode; do
             docker build --target "$harness" -t "rapunzel:$harness" .
             RAPUNZEL_HARNESS="$harness" ./test.sh
           done

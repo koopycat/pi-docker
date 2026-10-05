@@ -22,7 +22,7 @@
       "customType": "regex",
       "managerFilePatterns": ["/^Dockerfile$/"],
       "matchStrings": [
-        "ARG (?:CLAUDE|CODEX|DSH)_PACKAGE=(?<depName>\\S+)\\nARG (?:CLAUDE|CODEX|DSH)_VERSION=(?<currentValue>\\S+)"
+        "ARG (?:CLAUDE|CODEX|DSH|OPENCODE)_PACKAGE=(?<depName>\\S+)\\nARG (?:CLAUDE|CODEX|DSH|OPENCODE)_VERSION=(?<currentValue>\\S+)"
       ],
       "datasourceTemplate": "npm"
     },
@@ -60,8 +60,8 @@
       "platformAutomerge": false
     },
     {
-      "description": "Claude Code, Codex, and dsh release several times a week, and CI smoke-tests their images only when the Dockerfile changes: one weekly PR, reviewed by hand",
-      "matchDepNames": ["@anthropic-ai/claude-code", "@openai/codex", "@deepseek-ai/dsh"],
+      "description": "Claude Code, Codex, dsh, and opencode release several times a week, and CI smoke-tests their images only when the Dockerfile changes: one weekly PR, reviewed by hand",
+      "matchDepNames": ["@anthropic-ai/claude-code", "@openai/codex", "@deepseek-ai/dsh", "opencode-ai"],
       "groupName": "harness CLIs",
       "semanticCommitType": "feat",
       "semanticCommitScope": "harnesses",

@@ -2,7 +2,7 @@
 
 rapunzel runs coding-agent harnesses against a project inside a hardened Docker sandbox. The agent sees one host directory, the project mounted at `/workspace`, and keeps its settings, logins, sessions, and extensions in a separate Docker volume per project. It runs without root, receives only an allowlist of environment variables, and can be limited to named hosts or kept away from your provider keys entirely.
 
-The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`) and [Codex CLI](#codex-cli) (`--harness codex`), and [DeepSeek Harness](#deepseek-harness) (`--harness dsh`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`), and each has a shortcut, `rapunzel-claude`, `rapunzel-codex`, and `rapunzel-dsh`, that also loads `~/.config/rapunzel/<harness>.env` when it exists; they support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
+The [pi coding agent](https://github.com/earendil-works/pi-mono) is the default harness. [Claude Code](#claude-code) (`--harness claude`), [Codex CLI](#codex-cli) (`--harness codex`), [DeepSeek Harness](#deepseek-harness) (`--harness dsh`), and [opencode](#opencode) (`--harness opencode`) are further profiles on the same launcher, each in its own image (`docker build --target <harness> -t rapunzel:<harness> .`), and each has a shortcut, `rapunzel-claude`, `rapunzel-codex`, `rapunzel-dsh`, and `rapunzel-opencode`, that also loads `~/.config/rapunzel/<harness>.env` when it exists; they support `open` and `allowlist` egress, not `strict` yet. Copilot CLI is planned.
 
 The name: Rapunzel is kept in a tower whose only way out is a single strand you control. Here the tower is the container, and the strand is the one project directory and, optionally, the one egress proxy.
 
@@ -92,6 +92,18 @@ DEEPSEEK_API_KEY=... ./rapunzel --harness dsh --exec . dsh headless "run the tes
 ```
 
 DeepSeek Harness (`dsh`) has no terminal UI. Without harness arguments, rapunzel starts `dsh web` and publishes it on `127.0.0.1:3080` only (`RAPUNZEL_PORT` changes the port); open the tokenized URL dsh prints. The web UI needs `RAPUNZEL_EGRESS=open`, because the restricted modes have no published ports. `dsh headless` works in `allowlist` mode too (`api.deepseek.com` is allowed). dsh keeps its own Landlock sandbox and approval prompts, which work inside the container, and rapunzel seeds a home-level patch that turns off dsh's default session-log upload to the DeepSeek API.
+
+## opencode
+
+```bash
+docker build --target opencode -t rapunzel:opencode .
+./rapunzel-opencode [PROJECT_DIR [opencode arguments...]]
+./rapunzel-opencode --exec . opencode run "run the tests"
+```
+
+Pass any provider key opencode knows (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY` for opencode Zen, and the rest of the shared list), or sign in once per project volume with `./rapunzel-opencode --exec . opencode auth login`. opencode keeps its config, logins, and sessions in the project's volume, never in the host's `~/.config/opencode` or `~/.local/share/opencode`. `OPENCODE_CONFIG_CONTENT` passes host-side config, such as a default model, without editing the volume. In `allowlist` mode, allow the provider's host yourself unless a key adds it (opencode Zen: `RAPUNZEL_EGRESS_ALLOW=opencode.ai`); opencode then uses its bundled model catalog instead of fetching models.dev. `strict` is not supported for opencode yet.
+
+opencode has no sandbox of its own and runs tools without asking by default; the container is the boundary. Set `OPENCODE_PERMISSION` (JSON) to require approval, for example `{"bash":"ask","edit":"ask"}`.
 
 ## What stays separate
 

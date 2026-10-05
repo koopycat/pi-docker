@@ -122,6 +122,42 @@ USER agent
 CMD ["dsh", "headless", "--help"]
 
 # ---------------------------------------------------------------------------
+# opencode: profiles/opencode/profile.sh
+# ---------------------------------------------------------------------------
+FROM base AS opencode
+
+ARG OPENCODE_PACKAGE=opencode-ai
+ARG OPENCODE_VERSION=1.18.34
+
+# Like Claude Code: a placeholder binary and a postinstall that links in the
+# platform's native one from an optional dependency, so run only that script.
+# The binary is a hard link, so the platform packages can go in the same layer.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g --ignore-scripts "${OPENCODE_PACKAGE}@${OPENCODE_VERSION}" \
+    && cd "$(npm root -g)/${OPENCODE_PACKAGE}" \
+    && node postinstall.mjs \
+    && rm -rf node_modules \
+    && opencode --version
+
+# opencode has no single home variable; it follows XDG. All four directories
+# live in the volume, so config, logins, sessions, and plugin caches persist.
+# Not ~/.opencode: opencode loads that as a second global config directory.
+RUN mkdir -p /home/agent/.opencode-state \
+    && chown agent:agent /home/agent/.opencode-state
+
+# The install is root-owned, so the auto-updater could only fail; update by
+# rebuilding.
+ENV RAPUNZEL_STATE_DIR=/home/agent/.opencode-state \
+    XDG_CONFIG_HOME=/home/agent/.opencode-state/config \
+    XDG_DATA_HOME=/home/agent/.opencode-state/data \
+    XDG_STATE_HOME=/home/agent/.opencode-state/state \
+    XDG_CACHE_HOME=/home/agent/.opencode-state/cache \
+    OPENCODE_DISABLE_AUTOUPDATE=1
+
+USER agent
+CMD ["opencode"]
+
+# ---------------------------------------------------------------------------
 # pi: profiles/pi/profile.sh
 # ---------------------------------------------------------------------------
 FROM base AS pi

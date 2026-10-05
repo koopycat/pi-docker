@@ -54,7 +54,7 @@ docker run --rm \
     --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
     --env HOME=/home/agent \
     --env "RAPUNZEL_STATE_DIR=${H_STATE_DIR}" \
-    --env "${H_STATE_ENV}=${H_STATE_DIR}" \
+    ${H_STATE_ENV:+--env "${H_STATE_ENV}=${H_STATE_DIR}"} \
     --env HOST_HOME_PATH="$HOST_HOME" \
     "$IMAGE" \
     /usr/local/lib/rapunzel/verify-isolation-inner.sh

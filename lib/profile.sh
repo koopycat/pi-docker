@@ -23,10 +23,12 @@ load_profile() {
     # shellcheck disable=SC2034
     H_EGRESS_HOSTS=() H_STRICT_SUPPORTED=true
     # shellcheck disable=SC2034
-    H_DEFAULT_ARGS=() H_WEB_PORT='' H_WEB_PORT_ARG=''
+    H_DEFAULT_ARGS=() H_WEB_PORT='' H_WEB_PORT_ARG='' H_STATE_ENV=''
     # shellcheck disable=SC1090
     source "${PROFILES_DIR}/${name}/profile.sh"
-    for var in H_NAME H_CMD H_IMAGE H_STATE_DIR H_STATE_ENV; do
+    # H_STATE_ENV may be empty for a harness without a single home variable
+    # (opencode); its image then points the harness at H_STATE_DIR.
+    for var in H_NAME H_CMD H_IMAGE H_STATE_DIR; do
         if [[ -z "${!var:-}" ]]; then
             printf 'rapunzel: profile %s does not set %s\n' "$name" "$var" >&2
             return 1
