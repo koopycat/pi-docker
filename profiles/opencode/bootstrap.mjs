@@ -69,99 +69,123 @@ async function listModels(baseUrl, keyVariable) {
   return models;
 }
 
-const baseUrl = (env.RAPUNZEL_API_BASE_URL || env.RAPUNZEL_BASE_URL)?.trim();
-if (!baseUrl) {
-  await writeJson(file, {});
-  process.exit(0);
-}
+// The custom OpenAI-compatible provider from pi's RAPUNZEL_* settings, or
+// null. In strict mode the launcher has already pointed these at the
+// gateway's /custom route with a placeholder key.
+async function customProvider() {
+  const baseUrl = (env.RAPUNZEL_API_BASE_URL || env.RAPUNZEL_BASE_URL)?.trim();
+  if (!baseUrl) return null;
 
-const api = (env.RAPUNZEL_API || "openai-completions").trim();
-if (api !== "openai-completions") {
-  warn(`RAPUNZEL_API=${api} is not supported for opencode; only openai-completions is. No provider configured.`);
-  await writeJson(file, {});
-  process.exit(0);
-}
-
-const providerId = (env.RAPUNZEL_PROVIDER || "custom").trim();
-if (!/^[a-z0-9][a-z0-9._-]*$/.test(providerId)) {
-  throw new Error(`RAPUNZEL_PROVIDER must be a lowercase provider id, got ${JSON.stringify(providerId)}`);
-}
-const keyVariable = (env.RAPUNZEL_API_KEY_VARIABLE || "RAPUNZEL_API_KEY").trim();
-if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyVariable)) {
-  throw new Error(`RAPUNZEL_API_KEY_VARIABLE is not a variable name: ${JSON.stringify(keyVariable)}`);
-}
-
-const modelId = (env.RAPUNZEL_MODEL || env.RAPUNZEL_MODEL_ID)?.trim();
-let models = {};
-let source;
-let fetched = false;
-try {
-  models = await listModels(baseUrl, keyVariable);
-  source = `${Object.keys(models).length} models from ${baseUrl}`;
-  fetched = true;
-  await writeJson(cacheFile, { baseUrl, models });
-} catch (error) {
-  // fetch wraps the useful reason, such as the proxy's 403, a few causes deep.
-  let innermost = error;
-  while (innermost.cause instanceof Error) innermost = innermost.cause;
-  const reason = innermost.message || innermost.code || String(error);
-  let hint = "";
-  if (env.HTTPS_PROXY) {
-    hint = "; in allowlist mode, a host that resolves to a private address needs RAPUNZEL_EGRESS_ALLOW_PRIVATE";
+  const api = (env.RAPUNZEL_API || "openai-completions").trim();
+  if (api !== "openai-completions") {
+    warn(`RAPUNZEL_API=${api} is not supported for opencode; only openai-completions is. No custom provider configured.`);
+    return null;
   }
-  let cached;
+
+  const id = (env.RAPUNZEL_PROVIDER || "custom").trim();
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(id)) {
+    throw new Error(`RAPUNZEL_PROVIDER must be a lowercase provider id, got ${JSON.stringify(id)}`);
+  }
+  const keyVariable = (env.RAPUNZEL_API_KEY_VARIABLE || "RAPUNZEL_API_KEY").trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyVariable)) {
+    throw new Error(`RAPUNZEL_API_KEY_VARIABLE is not a variable name: ${JSON.stringify(keyVariable)}`);
+  }
+
+  const modelId = (env.RAPUNZEL_MODEL || env.RAPUNZEL_MODEL_ID)?.trim();
+  let models = {};
   try {
-    cached = JSON.parse(await readFile(cacheFile, "utf8"));
-  } catch {
-    // Missing or unreadable; the next successful listing rewrites it.
-  }
-  if (cached?.baseUrl === baseUrl && cached.models && typeof cached.models === "object") {
-    // The cache is in the agent-writable volume; keep only the fields a
-    // listing can produce.
-    for (const [id, entry] of Object.entries(cached.models)) {
-      if (!validId(id) || !entry || typeof entry !== "object") continue;
-      models[id] = modelFromListing({
-        name: entry.name,
-        context_length: entry.limit?.context,
-        max_output_tokens: entry.limit?.output,
-        capabilities: { tool_calling: entry.tool_call, reasoning: entry.reasoning },
-      });
+    models = await listModels(baseUrl, keyVariable);
+    await writeJson(cacheFile, { baseUrl, models });
+    console.warn(`rapunzel: opencode provider ${id}: ${Object.keys(models).length} models from ${baseUrl}`);
+  } catch (error) {
+    // fetch wraps the useful reason, such as the proxy's 403, a few causes deep.
+    let innermost = error;
+    while (innermost.cause instanceof Error) innermost = innermost.cause;
+    const reason = innermost.message || innermost.code || String(error);
+    let hint = "";
+    if (env.HTTPS_PROXY) {
+      hint = "; in allowlist mode, a host that resolves to a private address needs RAPUNZEL_EGRESS_ALLOW_PRIVATE";
     }
-    source = `${Object.keys(models).length} cached models`;
-    warn(`warning: could not list models from ${baseUrl}/models (${reason})${hint}; using ${source}`);
-  } else {
-    source = modelId ? `only ${modelId}` : "no models";
-    warn(`warning: could not list models from ${baseUrl}/models (${reason})${hint}; nothing cached, offering ${source}`);
+    let cached;
+    try {
+      cached = JSON.parse(await readFile(cacheFile, "utf8"));
+    } catch {
+      // Missing or unreadable; the next successful listing rewrites it.
+    }
+    if (cached?.baseUrl === baseUrl && cached.models && typeof cached.models === "object") {
+      // The cache is in the agent-writable volume; keep only the fields a
+      // listing can produce.
+      for (const [cachedId, entry] of Object.entries(cached.models)) {
+        if (!validId(cachedId) || !entry || typeof entry !== "object") continue;
+        models[cachedId] = modelFromListing({
+          name: entry.name,
+          context_length: entry.limit?.context,
+          max_output_tokens: entry.limit?.output,
+          capabilities: { tool_calling: entry.tool_call, reasoning: entry.reasoning },
+        });
+      }
+      warn(`warning: could not list models from ${baseUrl}/models (${reason})${hint}; using ${Object.keys(models).length} cached models`);
+    } else {
+      const offered = modelId ? `only ${modelId}` : "no models";
+      warn(`warning: could not list models from ${baseUrl}/models (${reason})${hint}; nothing cached, offering ${offered}`);
+    }
   }
-}
 
-if (modelId) {
-  const model = { ...(models[modelId] ?? {}) };
-  const name = env.RAPUNZEL_MODEL_NAME?.trim();
-  if (name) model.name = name;
-  const context = numericEnv("RAPUNZEL_CONTEXT_WINDOW");
-  const output = numericEnv("RAPUNZEL_MAX_TOKENS");
-  if (context || output) {
-    model.limit = { ...(model.limit ?? { context: 128000, output: 16384 }) };
-    if (context) model.limit.context = context;
-    if (output) model.limit.output = output;
+  if (modelId) {
+    const model = { ...(models[modelId] ?? {}) };
+    const name = env.RAPUNZEL_MODEL_NAME?.trim();
+    if (name) model.name = name;
+    const context = numericEnv("RAPUNZEL_CONTEXT_WINDOW");
+    const output = numericEnv("RAPUNZEL_MAX_TOKENS");
+    if (context || output) {
+      model.limit = { ...(model.limit ?? { context: 128000, output: 16384 }) };
+      if (context) model.limit.context = context;
+      if (output) model.limit.output = output;
+    }
+    models[modelId] = model;
   }
-  models[modelId] = model;
-}
 
-const config = {
-  $schema: "https://opencode.ai/config.json",
-  provider: {
-    [providerId]: {
+  return {
+    id,
+    modelId,
+    entry: {
       npm: "@ai-sdk/openai-compatible",
-      name: providerId,
+      name: id,
       // The key stays in the environment; opencode substitutes it at load time.
       options: { baseURL: baseUrl, apiKey: `{env:${keyVariable}}` },
       models,
     },
-  },
-};
-if (modelId) config.model = `${providerId}/${modelId}`;
-await writeJson(file, config);
-// A failed listing has already said which models are used.
-if (fetched) console.warn(`rapunzel: opencode provider ${providerId}: ${source}`);
+  };
+}
+
+const config = { $schema: "https://opencode.ai/config.json", provider: {} };
+
+// strict mode: opencode's built-in providers the credential gateway serves go
+// through it with a placeholder key; the gateway sends the real one upstream.
+const gatewayUrl = env.RAPUNZEL_GATEWAY_URL?.trim();
+if (gatewayUrl) {
+  const gatewayKey = "rapunzel-gateway";
+  const routes = { anthropic: "/anthropic/v1", openai: "/openai/v1" };
+  const served = (env.RAPUNZEL_GATEWAY_PROVIDERS ?? "").split(",").map((name) => name.trim());
+  for (const [name, route] of Object.entries(routes)) {
+    if (served.includes(name)) {
+      config.provider[name] = { options: { baseURL: `${gatewayUrl}${route}`, apiKey: gatewayKey } };
+    }
+  }
+  try {
+    const auth = JSON.parse(await readFile(join(stateDir, "data", "opencode", "auth.json"), "utf8"));
+    if (Object.keys(auth).length > 0) {
+      warn("auth.json in the agent volume holds logins inside the sandbox; the gateway cannot keep those out. Remove them with `opencode auth logout`.");
+    }
+  } catch {
+    // No logins.
+  }
+}
+
+const custom = await customProvider();
+if (custom) {
+  config.provider[custom.id] = custom.entry;
+  if (custom.modelId) config.model = `${custom.id}/${custom.modelId}`;
+}
+
+await writeJson(file, Object.keys(config.provider).length > 0 ? config : {});

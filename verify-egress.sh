@@ -24,6 +24,8 @@ ROOT_DIR=$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)
 # shellcheck source=lib/docker.sh
 source "${ROOT_DIR}/lib/docker.sh"
 IMAGE=${RAPUNZEL_IMAGE:-rapunzel}
+# Checked in strict mode as well when this image has been built.
+OPENCODE_IMAGE=${RAPUNZEL_OPENCODE_IMAGE:-rapunzel:opencode}
 VOLUME=${RAPUNZEL_VOLUME:-rapunzel-egress-check}
 MODES=("$@")
 [[ ${#MODES[@]} -gt 0 ]] || MODES=(allowlist strict)
@@ -47,9 +49,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A run may also sweep resources an earlier, killed run left behind, so only
+# growth counts as a leak.
 egress_resources() {
-    docker ps --all --quiet --filter label=rapunzel.egress=1 | wc -l | tr -d ' '
-    docker network ls --quiet --filter label=rapunzel.egress=1 | wc -l | tr -d ' '
+    {
+        docker ps --all --quiet --filter label=rapunzel.egress=1
+        docker network ls --quiet --filter label=rapunzel.egress=1
+    } | wc -l | tr -d ' '
 }
 before=$(egress_resources)
 
@@ -155,15 +161,11 @@ check_private_host() {
     docker rm --force "$upstream" >/dev/null 2>&1 || true
 }
 
-check_strict() {
-    printf '== strict (Caddy credential gateway, offline)\n'
-    local secret anthropic_secret port bridge_gateway output env_line models_line echo_line value
-    secret="pd-secret-$(random_token)"
-    anthropic_secret="pd-secret-$(random_token)"
-
-    # The echo server replies with the path and auth headers it received. The
-    # gateway reaches it through a published port on the default bridge's host
-    # address, because each run's gateway sits on its own outbound network.
+# The echo server replies with the path and auth headers it received, plus a
+# one-model list for clients that ask for /models. The gateway reaches it
+# through a published port on the default bridge's host address, because each
+# run's gateway sits on its own outbound network. Sets port and bridge_gateway.
+start_echo() {
     docker run --detach --rm \
         --name "$upstream" \
         --publish 0:8080 \
@@ -178,15 +180,24 @@ check_strict() {
                 path: req.url,
                 authorization: req.headers.authorization ?? null,
                 xApiKey: req.headers["x-api-key"] ?? null,
+                data: [{ id: "echo-model" }],
             }));
         }).listen(8080);' >/dev/null
     port=$(docker port "$upstream" 8080/tcp | head -n1 | sed 's/.*://')
     bridge_gateway=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
     [[ -n "$port" && -n "$bridge_gateway" ]] || {
         fail "echo upstream has no published port or bridge gateway"
-        return
+        return 1
     }
+}
 
+check_strict() {
+    printf '== strict (Caddy credential gateway, offline)\n'
+    local secret anthropic_secret port bridge_gateway output env_line models_line echo_line value
+    secret="pd-secret-$(random_token)"
+    anthropic_secret="pd-secret-$(random_token)"
+
+    start_echo || return
     probe_args=(strict "$bridge_gateway" "$port" "$canary_port")
     output=$(probe RAPUNZEL_EGRESS=strict \
         RAPUNZEL_PROVIDER=echo \
@@ -225,10 +236,76 @@ check_strict() {
     docker rm --force "$upstream" >/dev/null 2>&1 || true
 }
 
+# opencode in strict mode: its bootstrap must route the custom provider and the
+# built-in anthropic provider through the gateway with the placeholder key,
+# list the custom models through it, and keep every real key out of the
+# sandbox.
+check_strict_opencode() {
+    printf '== strict with the opencode harness\n'
+    local secret anthropic_secret port bridge_gateway output config_line env_line echo_line value
+    secret="pd-secret-$(random_token)"
+    anthropic_secret="pd-secret-$(random_token)"
+    start_echo || return
+
+    output=$(env -u RAPUNZEL_NETWORK -u RAPUNZEL_BASE_URL -u OPENAI_API_KEY \
+        -u RAPUNZEL_EGRESS_ALLOW -u RAPUNZEL_EGRESS_LOGINS -u RAPUNZEL_EGRESS_ALLOW_PRIVATE \
+        -u RAPUNZEL_BASE_URL_VARIABLE \
+        RAPUNZEL_ENV_FILE= \
+        RAPUNZEL_HARNESS=opencode \
+        RAPUNZEL_IMAGE="$OPENCODE_IMAGE" \
+        RAPUNZEL_VOLUME="${VOLUME}-opencode" \
+        RAPUNZEL_EGRESS=strict \
+        RAPUNZEL_PROVIDER=echo \
+        RAPUNZEL_API_BASE_URL="http://${bridge_gateway}:${port}/v1" \
+        RAPUNZEL_API_KEY_VARIABLE=EXAMPLE_API_KEY \
+        EXAMPLE_API_KEY="$secret" \
+        ANTHROPIC_API_KEY="$anthropic_secret" \
+        "${ROOT_DIR}/rapunzel" --exec "$project" node -e '
+            const fs = require("node:fs");
+            const file = "/home/agent/.opencode-state/rapunzel/opencode.json";
+            console.log("CONFIG " + fs.readFileSync(file, "utf8").replace(/\s+/g, ""));
+            console.log("ENV " + JSON.stringify(process.env));
+            // The custom route leads to the echo server, offline.
+            fetch("http://llm-proxy:8080/custom/echo", { headers: { authorization: "Bearer attacker-key" } })
+                .then((r) => r.text()).then((t) => console.log("ECHO " + t), (e) => console.log("ECHO error " + e));
+        ' 2>&1)
+
+    config_line=$(section "$output" CONFIG)
+    env_line=$(section "$output" ENV)
+    echo_line=$(section "$output" ECHO)
+    [[ -n "$config_line" && -n "$env_line" && -n "$echo_line" ]] || {
+        printf '%s\n' "$output" >&2
+        fail "opencode probe output is incomplete"
+    }
+    # The echo line is the upstream's view, which carries the real key by design.
+    for value in "$secret" "$anthropic_secret"; do
+        [[ "$(grep -v '^ECHO ' <<<"$output")" != *"$value"* ]] || fail "a real credential reached the opencode sandbox"
+    done
+    [[ "$config_line" == *'"baseURL":"http://llm-proxy:8080/custom"'* ]] ||
+        fail "opencode's custom provider does not go through the gateway"
+    [[ "$config_line" == *'"apiKey":"{env:RAPUNZEL_API_KEY}"'* ]] ||
+        fail "opencode's custom provider does not use the placeholder variable"
+    [[ "$config_line" == *'"echo-model":'* ]] ||
+        fail "opencode did not list the custom models through the gateway"
+    [[ "$config_line" == *'"anthropic":{"options":{"baseURL":"http://llm-proxy:8080/anthropic/v1","apiKey":"rapunzel-gateway"}}'* ]] ||
+        fail "opencode's anthropic provider does not go through the gateway"
+    [[ "$echo_line" == *"\"authorization\":\"Bearer ${secret}\""* ]] ||
+        fail "the gateway did not replace opencode's key with the real one"
+    [[ "$echo_line" == *'"path":"/v1/echo"'* ]] || fail "the gateway did not map /custom to the upstream path"
+    docker rm --force "$upstream" >/dev/null 2>&1 || true
+}
+
 for mode in "${MODES[@]}"; do
     case "$mode" in
         allowlist) check_allowlist ;;
-        strict) check_strict ;;
+        strict)
+            check_strict
+            if docker image inspect "$OPENCODE_IMAGE" >/dev/null 2>&1; then
+                check_strict_opencode
+            else
+                printf '== strict with the opencode harness: skipped, %s is not built\n' "$OPENCODE_IMAGE"
+            fi
+            ;;
         *)
             printf 'Usage: %s [allowlist|strict]...\n' "$0" >&2
             exit 2
@@ -236,7 +313,7 @@ for mode in "${MODES[@]}"; do
     esac
 done
 
-[[ "$(egress_resources)" == "$before" ]] || fail "an egress container or network was left behind"
+[[ "$(egress_resources)" -le "$before" ]] || fail "an egress container or network was left behind"
 
 if [[ "$failures" -gt 0 ]]; then
     printf '%s check(s) failed\n' "$failures" >&2

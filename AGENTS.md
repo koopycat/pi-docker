@@ -29,7 +29,7 @@ pi is the default harness; Claude Code, Codex CLI, DeepSeek Harness (dsh), and o
 - Secrets enter at runtime through a Docker env-file or explicitly forwarded variables.
 - `RAPUNZEL_EGRESS=allowlist|strict` puts pi only on a per-run `--internal` network in isolated gateway mode; its one peer is a sidecar on a per-run outbound bridge (never the default bridge). Design and decisions live in `docs/egress.md`; update its decision records when changing `lib/egress.sh`.
 - allowlist mode: Pipelock must keep `sni_verification` and `sni_require_tls` on; `HTTP_PROXY` stays unset so cleartext fails closed. Allowed hosts come only from the host side (keys, base URL, `RAPUNZEL_EGRESS_LOGINS`, `RAPUNZEL_EGRESS_ALLOW`, `RAPUNZEL_EGRESS_ALLOW_PRIVATE`), never from agent-writable state such as `auth.json`. Private destinations are trusted only for exact names in `RAPUNZEL_EGRESS_ALLOW_PRIVATE`.
-- strict mode: pi receives no provider credentials; the Caddy gateway always overwrites auth headers and answers unknown routes with 403.
+- strict mode: the harness (pi, opencode) receives no provider credentials; the Caddy gateway always overwrites auth headers and answers unknown routes with 403.
 - Sidecar images are pinned by digest in `lib/egress.sh` and never automerged. Any change there must keep `./verify-egress.sh` passing.
 - The launcher publishes no ports, except a profile's web UI (`H_WEB_PORT`, dsh) when the harness runs with its default arguments in `open` egress mode: one port, bound to the host's `127.0.0.1` only, with the harness's own authentication left on.
 - Do not mount the host home directory, `~/.pi`, or `~/.ssh`.

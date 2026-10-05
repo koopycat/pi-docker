@@ -300,6 +300,7 @@ A listener on the host network acts as a canary.
   - the gateway answers unknown routes and unconfigured providers with `403`;
   - the gateway replaces the agent's credentials, and no real key reaches pi's environment or `models.json`;
   - the variables named by `RAPUNZEL_BASE_URL_VARIABLE` and `RAPUNZEL_API_KEY_VARIABLE` hold the gateway route and the placeholder.
+  - with the opencode harness, when `rapunzel:opencode` is built: the bootstrap routes the custom and `anthropic` providers through the gateway with the placeholder, lists the custom models through it, and no real key reaches the sandbox.
 - **Afterwards:** no sidecar container or network is left behind. A launcher killed before its cleanup leaves them for the next run's sweep ([D13](#d13-stale-per-run-resources-are-swept-by-the-next-run)).
 
 CI runs it on every pull request.

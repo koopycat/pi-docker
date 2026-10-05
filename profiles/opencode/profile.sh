@@ -23,7 +23,12 @@ H_ENV_ALLOW=(
     RAPUNZEL_API_KEY_VARIABLE RAPUNZEL_CONTEXT_WINDOW RAPUNZEL_MAX_TOKENS
     OPENCODE_CONFIG_CONTENT OPENCODE_PERMISSION
 )
-H_ENV_ALLOW_GATEWAY=()
+# In strict mode the agent gets only these; keys and the upstream URL go to the
+# gateway. OPENCODE_CONFIG_CONTENT stays out, because it can carry a key.
+H_ENV_ALLOW_GATEWAY=(
+    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
+    RAPUNZEL_API RAPUNZEL_CONTEXT_WINDOW RAPUNZEL_MAX_TOKENS OPENCODE_PERMISSION
+)
 # These would move opencode's state out of the volume or load config from
 # elsewhere. The image sets OPENCODE_CONFIG to the bootstrap's file.
 H_ENV_DENY=(
@@ -38,6 +43,6 @@ H_OFFLINE_ENV=(OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_LSP_DOWNLOAD=1)
 # RAPUNZEL_EGRESS_ALLOW; opencode Zen needs opencode.ai.
 H_EGRESS_HOSTS=()
 
-# strict mode would need opencode's providers pointed at the gateway routes
-# with placeholder keys; untested, so strict is refused for now.
-H_STRICT_SUPPORTED=false
+# strict mode: the bootstrap points the custom provider and the built-in
+# anthropic and openai providers at the gateway with a placeholder key.
+H_STRICT_SUPPORTED=true

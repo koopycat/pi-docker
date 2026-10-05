@@ -9,7 +9,7 @@ Each harness is a profile in `profiles/<name>/` with its own image and its own p
 | Claude Code | `claude` | `rapunzel:claude` | `/home/agent/.claude` | `ANTHROPIC_API_KEY`, or `CLAUDE_CODE_OAUTH_TOKEN` from the host's `claude setup-token` | `open`, `allowlist` |
 | Codex CLI | `codex` | `rapunzel:codex` | `/home/agent/.codex` | `OPENAI_API_KEY`/`CODEX_API_KEY`, or a ChatGPT login inside the sandbox | `open`, `allowlist` |
 | DeepSeek Harness | `dsh` | `rapunzel:dsh` | `/home/agent/.dsh` | `DEEPSEEK_API_KEY` | web UI: `open`; headless: `open`, `allowlist` |
-| opencode | `opencode` | `rapunzel:opencode` | `/home/agent/.opencode-state` | provider keys, `OPENCODE_API_KEY` (Zen), or `opencode auth login` inside the sandbox | `open`, `allowlist` |
+| opencode | `opencode` | `rapunzel:opencode` | `/home/agent/.opencode-state` | provider keys, custom providers, `OPENCODE_API_KEY` (Zen), or `opencode auth login` inside the sandbox | `open`, `allowlist`, `strict` |
 
 Copilot CLI is planned.
 Most of this guide describes the pi profile: where a section names pi's files, variables, or commands, it is about pi itself.
@@ -293,7 +293,7 @@ The project's `opencode.json` and `.opencode/` are in the [host-file report](#fi
 Egress:
 
 - `allowlist` adds `api.anthropic.com` and `api.openai.com` through their keys; allow any other provider's API host with `RAPUNZEL_EGRESS_ALLOW` (opencode Zen: `opencode.ai`). opencode honors `HTTPS_PROXY`. A login needs its sign-in hosts too, through `RAPUNZEL_EGRESS_LOGINS` or `RAPUNZEL_EGRESS_ALLOW`. In the restricted modes, `OPENCODE_DISABLE_MODELS_FETCH=1` keeps opencode on its bundled model catalog instead of fetching models.dev, and `OPENCODE_DISABLE_LSP_DOWNLOAD=1` stops language-server downloads that would fail.
-- `strict` is refused until opencode's providers are tested against the gateway routes.
+- `strict` works with `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and a custom provider. The bootstrap points opencode's built-in `anthropic` and `openai` providers at the gateway's `/anthropic/v1` and `/openai/v1` routes, and the custom provider at `/custom` (the launcher rewrites `RAPUNZEL_API_BASE_URL` and the key variable), all with the placeholder key `rapunzel-gateway`; the gateway sends the real key upstream. The custom provider's model list is fetched through the gateway too. `OPENCODE_CONFIG_CONTENT` is not passed in this mode, because it can carry a key; other providers, opencode Zen, and logins from `opencode auth login` have no route. The bootstrap warns when `auth.json` in the volume still holds logins.
 
 ### Custom provider for opencode
 
@@ -314,6 +314,7 @@ A successful listing is cached in the volume; when the endpoint cannot be reache
 The bootstrap writes `rapunzel/opencode.json` in the volume, which the image loads through `OPENCODE_CONFIG`, and rewrites it from the environment on every start.
 It never edits your own `opencode.json`: opencode merges the rapunzel file over it, and the project's config and `OPENCODE_CONFIG_CONTENT` override both.
 Remove the settings from the env file, and the provider is gone on the next start.
+In `strict` mode the same settings route through the credential gateway; see the egress notes above.
 
 For a model router that pi reaches through an [extension provider](#extension-providers), add `RAPUNZEL_PROVIDER` to its env file and link the file to opencode's default:
 
@@ -562,7 +563,7 @@ Both restricted modes put pi on a per-run Docker network created with `--interna
 The only other member is a sidecar container, which is pi's only way out.
 The sidecar and both networks are removed when pi exits.
 Both modes need Docker Engine 28 or newer, set the harness's offline switches (for pi `PI_OFFLINE`, `PI_SKIP_VERSION_CHECK`, and `PI_TELEMETRY=0`), and cannot be combined with `RAPUNZEL_NETWORK`.
-`strict` is available for pi only; the other harnesses refuse it.
+`strict` is available for pi and opencode; the other harnesses refuse it.
 
 ### allowlist mode
 
