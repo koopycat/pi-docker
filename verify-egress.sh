@@ -38,7 +38,9 @@ random_token() { od -An -N12 -tx1 /dev/urandom | tr -d ' \n'; }
 upstream="rapunzel-egress-upstream-$$"
 canary="rapunzel-egress-canary-$$"
 canary_port=$((20000 + RANDOM % 20000))
-project=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-egress-project.XXXXXX")
+# Inside the checkout, which Docker Desktop and Colima share by default; macOS
+# $TMPDIR (/var/folders) is not shared with the Docker VM.
+project=$(mktemp -d "${ROOT_DIR}/.rapunzel-verify.XXXXXX")
 cleanup() {
     docker rm --force "$upstream" "$canary" >/dev/null 2>&1 || true
     rm -rf "$project"

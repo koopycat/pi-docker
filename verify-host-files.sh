@@ -30,7 +30,9 @@ command -v git >/dev/null 2>&1 || {
     exit 1
 }
 
-project=$(mktemp -d "${TMPDIR:-/tmp}/rapunzel-host-files.XXXXXX")
+# Inside the checkout, which Docker Desktop and Colima share by default; macOS
+# $TMPDIR (/var/folders) is not shared with the Docker VM.
+project=$(mktemp -d "${ROOT_DIR}/.rapunzel-verify.XXXXXX")
 report=$(mktemp "${TMPDIR:-/tmp}/rapunzel-host-files-report.XXXXXX")
 trap 'rm -rf "$project" "$report"' EXIT
 

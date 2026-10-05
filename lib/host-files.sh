@@ -120,8 +120,8 @@ host_files_report() {
         END { for (path in seen) print "  removed: " path }
     ' "$before" "$after" | sort -u)
     [[ -n "$changes" ]] || return 0
+    printf 'rapunzel: %s changed files that the host may run on its own.\n' "${H_NAME:-the agent}" >&2
     printf '%s\n' \
-        'rapunzel: pi changed files that the host may run on its own.' \
         'Review them before running git, direnv, your editor, or build tools in this project:' \
         "$changes" >&2
 }
