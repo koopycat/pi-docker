@@ -54,6 +54,7 @@ else
 fi
 
 require_docker rapunzel-ext
+ensure_image rapunzel-ext "$IMAGE" "$H_NAME" "$SCRIPT_DIR"
 
 if [[ "$COMMAND" == list ]]; then
     printf 'Volume: %s\n' "$VOLUME"

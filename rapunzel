@@ -29,8 +29,8 @@ Usage: rapunzel [--harness NAME] [--shell] [PROJECT_DIR [harness arguments...]]
 PROJECT_DIR defaults to the current directory. Harness arguments need an
 explicit PROJECT_DIR in front of them, for example: rapunzel . --continue
 
-Build the image first with:
-  docker build -t rapunzel .
+A missing local image is built from this checkout on first use; rebuild it
+after updating the checkout, for example: docker build -t rapunzel .
 
 Options:
   --harness NAME          Harness profile to run (default: pi, see profiles/)
@@ -168,13 +168,7 @@ if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
 fi
 
 require_docker rapunzel
-# A local image name that was never built would otherwise send docker to pull
-# it from Docker Hub. Registry references (with a /) are left to docker.
-if [[ "$IMAGE" != */* ]] && ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-    printf 'rapunzel: image %s is missing; build it with:\n  docker build --target %s -t %s %s\n' \
-        "$IMAGE" "$H_NAME" "$IMAGE" "$SCRIPT_DIR" >&2
-    exit 1
-fi
+ensure_image rapunzel "$IMAGE" "$H_NAME" "$SCRIPT_DIR"
 
 filtered_env=""
 egress_dir=""

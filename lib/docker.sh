@@ -3,6 +3,7 @@
 #
 # Source this file from the scripts. It defines:
 #   require_docker NAME - exit with advice when the Docker engine is unreachable
+#   ensure_image NAME IMAGE TARGET CONTEXT - build a missing local image
 
 require_docker() {
     local name=${1:?require_docker requires the calling script name}
@@ -38,4 +39,22 @@ require_docker() {
         printf '  docker context ls\n  docker context use <name>\n'
     } >&2
     exit 1
+}
+
+# Build IMAGE from the Dockerfile stage TARGET in CONTEXT when it does not exist
+# yet. Only local names (without a /) are built: docker would otherwise look
+# for a same-named image on Docker Hub. Registry references are left to docker.
+# Build output goes to stderr, so a command's own stdout stays clean.
+ensure_image() {
+    local name=${1:?ensure_image requires the calling script name}
+    local image=${2:?ensure_image requires an image} target=${3:?ensure_image requires a target}
+    local context=${4:?ensure_image requires a build context}
+    [[ "$image" != */* ]] || return 0
+    docker image inspect "$image" >/dev/null 2>&1 && return 0
+    printf '%s: image %s is missing; building it from %s (stage %s)\n' \
+        "$name" "$image" "$context" "$target" >&2
+    if ! docker build --target "$target" -t "$image" "$context" >&2; then
+        printf '%s: building %s failed\n' "$name" "$image" >&2
+        exit 1
+    fi
 }

@@ -59,7 +59,7 @@ rapunzel --harness codex . resume --last
 
 `--harness` comes before every other argument.
 The links `rapunzel-claude`, `rapunzel-codex`, `rapunzel-dsh`, and `rapunzel-opencode` in this checkout select their harness by name (`rapunzel-claude .` is `rapunzel --harness claude .`); a link you make yourself, such as `ln -s ~/src/rapunzel/rapunzel ~/bin/rapunzel-codex`, works the same way.
-When the harness image has not been built, `rapunzel` prints the `docker build` command instead of letting Docker look for it on Docker Hub.
+When the harness image has not been built, `rapunzel` (and `rapunzel-ext`) builds it from the checkout's `Dockerfile` stage of that harness, with the build output on stderr, instead of letting Docker look for it on Docker Hub. An existing image is never rebuilt automatically; rebuild it yourself to pick up changes or a new harness version.
 
 Without `RAPUNZEL_ENV_FILE`, the launcher loads `${XDG_CONFIG_HOME:-~/.config}/rapunzel/<harness>.env` when that file exists, for example `claude.env` with a `CLAUDE_CODE_OAUTH_TOKEN` or `pi.env` with provider keys, and says so on startup.
 It goes through the same allowlist filter as any env file. Set `RAPUNZEL_ENV_FILE=` (empty) to run without it.
