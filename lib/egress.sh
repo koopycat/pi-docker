@@ -39,9 +39,42 @@ EGRESS_PRIVATE_HOSTS=()
 GATEWAY_PROVIDERS=""
 GATEWAY_CUSTOM=false
 
+# Every per-run resource names its launcher, so a later run can remove what a
+# killed one left behind (D13).
+EGRESS_OWNER="$(hostname 2>/dev/null || uname -n)/$$"
+
+# Remove sidecars and networks whose launcher on this host no longer runs. A
+# launcher killed outright, or one whose terminal closed mid-cleanup, cannot
+# remove them itself. A live PID, even a reused one, keeps its resources.
+egress_sweep_stale() {
+    local host=${EGRESS_OWNER%/*} kind owner pid name
+    for kind in container network; do
+        while read -r name owner; do
+            [[ -n "$name" && "${owner%/*}" == "$host" ]] || continue
+            pid=${owner##*/}
+            [[ "$pid" =~ ^[0-9]+$ ]] || continue
+            ps -p "$pid" >/dev/null 2>&1 && continue
+            if [[ "$kind" == container ]]; then
+                docker rm --force --volumes "$name" >/dev/null 2>&1 || true
+            else
+                docker network rm "$name" >/dev/null 2>&1 || true
+            fi
+        done < <(
+            if [[ "$kind" == container ]]; then
+                docker ps --all --filter label=rapunzel.egress=1 \
+                    --format '{{.Names}} {{.Label "rapunzel.owner"}}' 2>/dev/null
+            else
+                docker network ls --filter label=rapunzel.egress=1 \
+                    --format '{{.Name}} {{.Label "rapunzel.owner"}}' 2>/dev/null
+            fi
+        )
+    done
+}
+
 egress_networks_create() {
     local run_id
     run_id="$(date +%s)-$$-${RANDOM}"
+    egress_sweep_stale
 
     # Isolated gateway mode (Docker Engine 28+) leaves the bridge without a
     # host-side address, so pi cannot reach services on the host.
@@ -50,6 +83,7 @@ egress_networks_create() {
         --opt com.docker.network.bridge.gateway_mode_ipv4=isolated \
         --opt com.docker.network.bridge.gateway_mode_ipv6=isolated \
         --label rapunzel.egress=1 \
+        --label "rapunzel.owner=${EGRESS_OWNER}" \
         "$EGRESS_NETWORK" >/dev/null; then
         EGRESS_NETWORK=""
         printf 'rapunzel: could not create an isolated internal network; RAPUNZEL_EGRESS needs Docker Engine 28 or newer\n' >&2
@@ -60,6 +94,7 @@ egress_networks_create() {
     if ! docker network create \
         --opt com.docker.network.bridge.enable_icc=false \
         --label rapunzel.egress=1 \
+        --label "rapunzel.owner=${EGRESS_OWNER}" \
         "$EGRESS_OUTBOUND" >/dev/null; then
         EGRESS_OUTBOUND=""
         printf 'rapunzel: could not create the outbound network for the egress sidecar\n' >&2
@@ -182,6 +217,7 @@ allowlist_start() {
     docker create \
         --name "$EGRESS_SIDECAR" \
         --label rapunzel.egress=1 \
+        --label "rapunzel.owner=${EGRESS_OWNER}" \
         --network "$EGRESS_NETWORK" \
         --network-alias "$EGRESS_PROXY_ALIAS" \
         --user 65532:65532 \
@@ -295,6 +331,7 @@ gateway_start() {
     docker create \
         --name "$EGRESS_SIDECAR" \
         --label rapunzel.egress=1 \
+        --label "rapunzel.owner=${EGRESS_OWNER}" \
         --network "$EGRESS_NETWORK" \
         --network-alias "$GATEWAY_ALIAS" \
         --user 65534:65534 \

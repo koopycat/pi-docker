@@ -256,6 +256,20 @@ Cloud metadata and link-local ranges stay blocked; Pipelock does not let them be
 
 `strict` mode needs no such setting: the Caddy gateway forwards only to its configured upstreams.
 
+### D13: Stale per-run resources are swept by the next run
+
+**Decision.**
+Each per-run network and sidecar carries the label `rapunzel.owner=<host>/<launcher PID>`.
+Before a restricted run creates its own, it removes labeled sidecars and networks from the same host whose launcher process no longer exists.
+The launcher's exit handler also removes its resources before it prints anything, with errexit off and `SIGHUP` ignored.
+
+**Why.**
+A launcher can die before its exit handler finishes: closing a terminal pane in Herdr sends `SIGHUP` and kills the shell about a second later, which is not enough time for `docker rm`.
+The orphaned sidecar keeps its allowlist and its outbound network, idle but running.
+A sweep at the next start handles every way a launcher can die, including `SIGKILL` and a reboot of the host.
+It never touches a run whose PID is alive, even when the PID was reused, nor resources from another host sharing the Docker daemon.
+Resources created before the label existed are not swept; remove them with `docker ps --all --filter label=rapunzel.egress=1` and `docker network ls --filter label=rapunzel.egress=1`.
+
 ## Residual risks
 
 Ranked by the security review:
@@ -286,10 +300,11 @@ A listener on the host network acts as a canary.
   - the gateway answers unknown routes and unconfigured providers with `403`;
   - the gateway replaces the agent's credentials, and no real key reaches pi's environment or `models.json`;
   - the variables named by `RAPUNZEL_BASE_URL_VARIABLE` and `RAPUNZEL_API_KEY_VARIABLE` hold the gateway route and the placeholder.
-- **Afterwards:** no sidecar container or network is left behind.
+- **Afterwards:** no sidecar container or network is left behind. A launcher killed before its cleanup leaves them for the next run's sweep ([D13](#d13-stale-per-run-resources-are-swept-by-the-next-run)).
 
 CI runs it on every pull request.
-Tested on Docker Desktop 29 (macOS, arm64) and Docker Engine 28 (Ubuntu, CI); WSL2 is not yet tested.
+Tested on Docker Desktop 29 (macOS, arm64), Colima with Docker Engine 29 (macOS, arm64), and Docker Engine 28 (Ubuntu, CI); WSL2 is not yet tested.
+The verify scripts create their temporary projects inside the checkout, because macOS `$TMPDIR` is not shared with the Docker VM.
 
 ## Next steps
 
