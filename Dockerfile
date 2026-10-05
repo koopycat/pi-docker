@@ -145,9 +145,13 @@ RUN --mount=type=cache,target=/root/.npm \
 RUN mkdir -p /home/agent/.opencode-state \
     && chown agent:agent /home/agent/.opencode-state
 
+COPY --chmod=0755 profiles/opencode/bootstrap.mjs /usr/local/lib/rapunzel/bootstrap-harness.mjs
+
 # The install is root-owned, so the auto-updater could only fail; update by
-# rebuilding.
+# rebuilding. OPENCODE_CONFIG is the bootstrap's provider file, merged over
+# the user's opencode.json.
 ENV RAPUNZEL_STATE_DIR=/home/agent/.opencode-state \
+    OPENCODE_CONFIG=/home/agent/.opencode-state/rapunzel/opencode.json \
     XDG_CONFIG_HOME=/home/agent/.opencode-state/config \
     XDG_DATA_HOME=/home/agent/.opencode-state/data \
     XDG_STATE_HOME=/home/agent/.opencode-state/state \

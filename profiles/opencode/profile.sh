@@ -13,12 +13,19 @@ H_STATE_DIR=/home/agent/.opencode-state
 H_STATE_ENV=
 
 # Provider keys, including OPENCODE_API_KEY for opencode Zen, are in the
-# launcher's shared list. OPENCODE_CONFIG_CONTENT carries host-side config such
-# as a default model; OPENCODE_PERMISSION can tighten tool approvals.
-H_ENV_ALLOW=(OPENCODE_CONFIG_CONTENT OPENCODE_PERMISSION)
+# launcher's shared list. The RAPUNZEL_* provider settings are pi's; the
+# bootstrap turns them into an opencode provider, so one env file serves both.
+# OPENCODE_CONFIG_CONTENT carries host-side config such as a default model;
+# OPENCODE_PERMISSION can tighten tool approvals.
+H_ENV_ALLOW=(
+    RAPUNZEL_PROVIDER RAPUNZEL_MODEL RAPUNZEL_MODEL_ID RAPUNZEL_MODEL_NAME
+    RAPUNZEL_API_BASE_URL RAPUNZEL_BASE_URL RAPUNZEL_API RAPUNZEL_API_KEY
+    RAPUNZEL_API_KEY_VARIABLE RAPUNZEL_CONTEXT_WINDOW RAPUNZEL_MAX_TOKENS
+    OPENCODE_CONFIG_CONTENT OPENCODE_PERMISSION
+)
 H_ENV_ALLOW_GATEWAY=()
 # These would move opencode's state out of the volume or load config from
-# elsewhere.
+# elsewhere. The image sets OPENCODE_CONFIG to the bootstrap's file.
 H_ENV_DENY=(
     XDG_CONFIG_HOME XDG_DATA_HOME XDG_STATE_HOME XDG_CACHE_HOME
     OPENCODE_CONFIG OPENCODE_CONFIG_DIR OPENCODE_DB OPENCODE_TEST_HOME

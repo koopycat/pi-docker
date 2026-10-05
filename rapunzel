@@ -159,7 +159,8 @@ if [[ -n "${RAPUNZEL_ENV_FILE:-}" ]]; then
         printf 'rapunzel: env file does not exist: %s\n' "$RAPUNZEL_ENV_FILE" >&2
         exit 1
     fi
-    env_mode=$(stat -c '%a' "$RAPUNZEL_ENV_FILE" 2>/dev/null || stat -f '%Lp' "$RAPUNZEL_ENV_FILE")
+    # -L: a <harness>.env linked to a shared provider file reports the target's mode.
+    env_mode=$(stat -L -c '%a' "$RAPUNZEL_ENV_FILE" 2>/dev/null || stat -L -f '%Lp' "$RAPUNZEL_ENV_FILE")
     if [[ "$env_mode" != "600" ]]; then
         printf 'rapunzel: warning: %s has mode %s; use chmod 600 for an env file containing secrets\n' \
             "$RAPUNZEL_ENV_FILE" "$env_mode" >&2

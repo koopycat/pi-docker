@@ -104,6 +104,7 @@ RAPUNZEL_ENV_FILE="$ENV_DIR/provider.env" rapunzel
 ```
 
 `rapunzel` warns if the env file is not mode `600`, but does not change its permissions automatically.
+A default `<harness>.env` may be a symlink to a shared provider file; the mode check follows the link.
 The bootstrap writes or updates the custom provider in the container-local `models.json` on each startup.
 Its configuration is assembled from:
 
@@ -278,6 +279,8 @@ Credentials:
 - **API keys.** Any key in the shared list that opencode reads, such as `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `OPENCODE_API_KEY` for opencode Zen.
 - **Logins.** `rapunzel-opencode --exec . opencode auth login` stores the login in `auth.json` in the volume.
 
+- **Custom OpenAI-compatible endpoint**, such as a model router: the same `RAPUNZEL_*` settings as pi, described below.
+
 `OPENCODE_CONFIG_CONTENT` passes inline config from the host, such as `{"model":"anthropic/claude-sonnet-5-5"}`, without editing the volume.
 `XDG_*`, `OPENCODE_CONFIG`, `OPENCODE_CONFIG_DIR`, and `OPENCODE_DB` cannot be set from the host.
 The image sets `OPENCODE_DISABLE_AUTOUPDATE=1`, because the root-owned install cannot be updated in place.
@@ -291,6 +294,38 @@ Egress:
 
 - `allowlist` adds `api.anthropic.com` and `api.openai.com` through their keys; allow any other provider's API host with `RAPUNZEL_EGRESS_ALLOW` (opencode Zen: `opencode.ai`). opencode honors `HTTPS_PROXY`. A login needs its sign-in hosts too, through `RAPUNZEL_EGRESS_LOGINS` or `RAPUNZEL_EGRESS_ALLOW`. In the restricted modes, `OPENCODE_DISABLE_MODELS_FETCH=1` keeps opencode on its bundled model catalog instead of fetching models.dev, and `OPENCODE_DISABLE_LSP_DOWNLOAD=1` stops language-server downloads that would fail.
 - `strict` is refused until opencode's providers are tested against the gateway routes.
+
+### Custom provider for opencode
+
+On every start, `profiles/opencode/bootstrap.mjs` turns pi's custom-provider settings into an opencode provider, so one env file serves both harnesses:
+
+| Variable | Effect in opencode |
+|---|---|
+| `RAPUNZEL_API_BASE_URL` | Endpoint of an `@ai-sdk/openai-compatible` provider. Without it, no provider is configured. |
+| `RAPUNZEL_PROVIDER` | Provider id (default `custom`); models appear as `<id>/<model>`. |
+| `RAPUNZEL_API_KEY_VARIABLE` | The variable holding the key (default `RAPUNZEL_API_KEY`). The config refers to it as `{env:NAME}`, so the key is never written to the volume. |
+| `RAPUNZEL_MODEL` | Optional default model, added to the list even when the endpoint does not report it. `RAPUNZEL_MODEL_NAME`, `RAPUNZEL_CONTEXT_WINDOW`, and `RAPUNZEL_MAX_TOKENS` refine it. |
+| `RAPUNZEL_API` | Only `openai-completions` (the default) is supported; any other value configures no provider. |
+
+The model list comes from the endpoint's `/models` at startup, with a 5-second timeout.
+Names, context and output limits, and tool-calling and reasoning flags are used where the endpoint reports them, as OmniRoute does.
+A successful listing is cached in the volume; when the endpoint cannot be reached, the cached list for the same URL is used, with a warning.
+
+The bootstrap writes `rapunzel/opencode.json` in the volume, which the image loads through `OPENCODE_CONFIG`, and rewrites it from the environment on every start.
+It never edits your own `opencode.json`: opencode merges the rapunzel file over it, and the project's config and `OPENCODE_CONFIG_CONTENT` override both.
+Remove the settings from the env file, and the provider is gone on the next start.
+
+For a model router that pi reaches through an [extension provider](#extension-providers), add `RAPUNZEL_PROVIDER` to its env file and link the file to opencode's default:
+
+```bash
+echo RAPUNZEL_PROVIDER=omniroute >> ~/.config/rapunzel/omniroute.env
+ln -s omniroute.env ~/.config/rapunzel/opencode.env
+rapunzel-opencode
+RAPUNZEL_EGRESS=allowlist RAPUNZEL_EGRESS_ALLOW_PRIVATE=omniroute.example.lan rapunzel-opencode
+```
+
+pi ignores `RAPUNZEL_PROVIDER` without `RAPUNZEL_MODEL`, so the file still works for pi.
+Do not add `RAPUNZEL_MODEL` to a file pi shares, or pi registers its own provider next to the extension's; pick the model in opencode's `/models` instead, which it remembers, or set it in `OPENCODE_CONFIG_CONTENT`.
 
 ## Isolation properties
 
@@ -620,6 +655,7 @@ OMNIROUTE_API_KEY=replace-me
 | `strict` | `http://llm-proxy:8080/custom`, the gateway's custom route | the placeholder `rapunzel-gateway`; the gateway sends the real key upstream |
 
 Without `RAPUNZEL_PROVIDER` and `RAPUNZEL_MODEL`, the bootstrap registers no provider of its own, so only the extension's provider appears.
+pi needs both, so adding only `RAPUNZEL_PROVIDER` lets [opencode use the same file](#custom-provider-for-opencode).
 Install the extension into the project's volume with `rapunzel-ext` (see [Curated host extensions](#curated-host-extensions)).
 If the router resolves to a private address, add `RAPUNZEL_EGRESS_ALLOW_PRIVATE` with its host for `allowlist` mode.
 

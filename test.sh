@@ -34,6 +34,8 @@ docker image inspect "$IMAGE" >/dev/null 2>&1 || {
 
 prepare_volume_owner
 
+# Extra docker run options (such as --env) for the next run_env call.
+RUN_OPTS=()
 run() {
     docker run --rm \
         --user "$(id -u):$(id -g)" \
@@ -41,6 +43,7 @@ run() {
         --cap-drop=ALL \
         --security-opt=no-new-privileges \
         --mount "type=volume,src=${VOLUME},dst=${H_STATE_DIR},volume-nocopy" \
+        ${RUN_OPTS[@]+"${RUN_OPTS[@]}"} \
         "$IMAGE" \
         "$@"
 }
@@ -90,6 +93,68 @@ if [[ "$H_NAME" == pi ]]; then
         const require_ = createRequire("/usr/local/lib/node_modules/@earendil-works/pi-coding-agent/package.json");
         require_("esbuild").transformSync("let x: number = 1", { loader: "ts" });
     '
+fi
+
+if [[ "$H_NAME" == opencode ]]; then
+    provider_file=/home/agent/.opencode-state/rapunzel/opencode.json
+
+    # Without provider settings the rapunzel file is empty.
+    run node -e '
+        const c = require(process.argv[1]);
+        if (Object.keys(c).length !== 0) throw new Error("expected an empty provider file");
+    ' "$provider_file"
+
+    # pi's custom-provider settings become an opencode provider that refers to
+    # the key by name. The listing fails offline, so only RAPUNZEL_MODEL is in it.
+    RUN_OPTS=(
+        --env RAPUNZEL_PROVIDER=router --env RAPUNZEL_API_BASE_URL=https://router.invalid/v1
+        --env RAPUNZEL_MODEL=a/b --env RAPUNZEL_API_KEY_VARIABLE=ROUTER_API_KEY
+        --env ROUTER_API_KEY=sekrit-test-key
+    )
+    run bash -c '
+        set -e
+        node -e "
+            const p = require(process.argv[1]).provider.router;
+            const c = require(process.argv[1]);
+            if (p.npm !== \"@ai-sdk/openai-compatible\") throw new Error(\"npm: \" + p.npm);
+            if (p.options.baseURL !== \"https://router.invalid/v1\") throw new Error(\"baseURL\");
+            if (p.options.apiKey !== \"{env:ROUTER_API_KEY}\") throw new Error(\"apiKey: \" + p.options.apiKey);
+            if (Object.keys(p.models).join() !== \"a/b\") throw new Error(\"models\");
+            if (c.model !== \"router/a/b\") throw new Error(\"model: \" + c.model);
+        " "$1"
+        if grep -rq sekrit-test-key "$RAPUNZEL_STATE_DIR"; then echo "API key written to the volume" >&2; exit 1; fi
+        opencode models router | grep -qx router/a/b
+    ' -- "$provider_file"
+    RUN_OPTS=()
+
+    # A listing fills the models and is cached for the next start that cannot
+    # reach the endpoint. A loopback stub stands in for the router.
+    run bash -c '
+        set -e
+        bootstrap=/usr/local/lib/rapunzel/bootstrap-harness.mjs
+        node -e "
+            require(\"http\").createServer((req, res) => {
+                res.setHeader(\"content-type\", \"application/json\");
+                res.end(JSON.stringify({ data: [
+                    { id: \"x/y\", name: \"X Y\", context_length: 200000, max_output_tokens: 32000 },
+                    { id: \"z\" },
+                ] }));
+            }).listen(18080, \"127.0.0.1\");
+        " &
+        server=$!
+        for _ in $(seq 50); do node -e "fetch(\"http://127.0.0.1:18080/\").catch(() => process.exit(1))" && break; sleep 0.1; done
+        export RAPUNZEL_PROVIDER=router RAPUNZEL_API_BASE_URL=http://127.0.0.1:18080/v1 RAPUNZEL_MODEL=a/b
+        node "$bootstrap" "$RAPUNZEL_STATE_DIR"
+        check="
+            const m = require(process.argv[1]).provider.router.models;
+            if (Object.keys(m).sort().join() !== \"a/b,x/y,z\") throw new Error(\"models: \" + Object.keys(m));
+            if (m[\"x/y\"].name !== \"X Y\" || m[\"x/y\"].limit.context !== 200000) throw new Error(\"x/y\");
+        "
+        node -e "$check" "$1"
+        kill "$server"; wait "$server" 2>/dev/null || true
+        node "$bootstrap" "$RAPUNZEL_STATE_DIR" 2>&1 | grep -q "using 2 cached models"
+        node -e "$check" "$1"
+    ' -- "$provider_file"
 fi
 
 printf 'PASS: offline smoke test\n'
