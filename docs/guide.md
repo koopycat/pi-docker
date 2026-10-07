@@ -21,7 +21,7 @@ The pi profile follows pi's official [Plain Docker](https://github.com/earendil-
 
 ## Quick start
 
-Build the image with the pinned pi version (currently `1.0.2`):
+Build the image with the pinned pi version (currently `1.0.4`):
 
 ```bash
 docker build --pull -t rapunzel .
@@ -30,7 +30,7 @@ docker build --pull -t rapunzel .
 To choose a different published version explicitly:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=1.0.2 -t rapunzel .
+docker build --pull --build-arg PI_VERSION=1.0.4 -t rapunzel .
 ```
 
 Put this checkout on your `PATH`, for example in `~/.zshrc` or `~/.bashrc`:
@@ -472,7 +472,7 @@ The image pins pi at the `PI_VERSION` build argument's value.
 Rebuild with a deliberate version change:
 
 ```bash
-docker build --pull --build-arg PI_VERSION=1.0.2 -t rapunzel .
+docker build --pull --build-arg PI_VERSION=1.0.4 -t rapunzel .
 ```
 
 The other harnesses pin their versions the same way, with `CLAUDE_VERSION`, `CODEX_VERSION`, `DSH_VERSION`, and `OPENCODE_VERSION` (see the `ARG` lines in the `Dockerfile` for the current pins; Renovate proposes updates weekly):
